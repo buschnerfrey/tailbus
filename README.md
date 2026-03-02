@@ -33,9 +33,19 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **Real-time TUI dashboard** — terminal dashboard showing handles, peers, sessions, and live activity
 - **mTLS-ready** — identity package generates keypairs and certs (MVP runs insecure gRPC)
 
-## Prerequisites
+## Install
 
-- **Go 1.25+** with CGo enabled (required for SQLite)
+One-liner install from GitHub Releases (Linux and macOS):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/alexanderfrey/tailbus/main/install.sh | sh
+```
+
+This detects your OS/architecture, downloads the latest release, and installs all three binaries to `/usr/local/bin` (or `~/.local/bin` if no sudo).
+
+## Prerequisites (building from source)
+
+- **Go 1.25+** (no CGo required)
 - **protoc** with `protoc-gen-go` and `protoc-gen-go-grpc` (only needed if modifying `.proto` files)
 
 ## Build
@@ -134,6 +144,40 @@ Or using flags directly:
 curl http://localhost:9090/metrics
 ```
 
+## 3-Machine Demo
+
+The `examples/demo/` directory contains a ready-made travel agency scenario across 3 machines:
+
+| Machine | Role | Agents |
+|---------|------|--------|
+| A | Coord + daemon | `concierge` (orchestrator) |
+| B | Daemon only | `flights`, `hotels` (booking) |
+| C | Daemon only | `weather`, `currency` (data) |
+
+Quick version:
+
+```bash
+# Install on all 3 machines
+curl -sSL https://raw.githubusercontent.com/alexanderfrey/tailbus/main/install.sh | sh
+
+# Machine A: start coord + daemon, register agents
+tailbus-coord -config coord.toml
+tailbusd -config machine-a.toml       # after replacing __COORD_IP__ and __MY_IP__
+./register-agents.sh machine-a
+
+# Machine B & C: start daemon, register agents
+tailbusd -config machine-b.toml
+./register-agents.sh machine-b
+
+# From any machine: discover and interact
+tailbus list                           # all 5 agents across the mesh
+tailbus list booking                   # filter by tag
+tailbus introspect flights             # full manifest
+tailbus open concierge flights "Search NYC to London, Dec 20-27"
+```
+
+See [`examples/demo/README.md`](examples/demo/README.md) for the full step-by-step walkthrough.
+
 ## Configuration
 
 Both the coord server and daemon accept TOML config files via `-config`. Example files are in `examples/dev/`.
@@ -148,7 +192,7 @@ data_dir = "/tmp/tailbus-coord"
 | Field | Default | Description |
 |-------|---------|-------------|
 | `listen_addr` | `:8443` | gRPC listen address |
-| `data_dir` | `.` | Directory for SQLite database |
+| `data_dir` | `.` | Directory for SQLite database (pure-Go, no CGo) |
 
 ### Node daemon (`tailbusd`)
 
@@ -190,7 +234,7 @@ tailbus [flags] <command> [args]
 
 | Command | Usage | Description |
 |---------|-------|-------------|
-| `register` | `register <handle>` | Register an agent handle on the local node |
+| `register` | `register <handle> [-description "..."] [-tags "a,b"] [-version "1.0"]` | Register an agent handle with optional manifest |
 | `introspect` | `introspect <handle>` | Show the full service manifest for a handle |
 | `list` | `list [tags]` | List all handles, optionally filtered by comma-separated tags |
 | `open` | `open <from> <to> <message>` | Open a new session with an initial message |
@@ -487,6 +531,23 @@ make proto
 
 # Build all binaries
 make build
+```
+
+### Releasing
+
+Releases are built by [goreleaser](https://goreleaser.com/) via GitHub Actions. To publish a new release:
+
+```bash
+git tag v0.1.0
+git push --tags
+```
+
+This builds binaries for linux/darwin x amd64/arm64 and publishes them to GitHub Releases. The `install.sh` script automatically picks up the latest release.
+
+To test the build locally:
+
+```bash
+goreleaser build --snapshot --clean
 ```
 
 ### Running integration tests only
