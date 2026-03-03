@@ -28,10 +28,18 @@ type PeerInfo struct {
 	Manifest      ServiceManifest
 }
 
+// RelayInfo holds the network info for a relay server.
+type RelayInfo struct {
+	NodeID    string
+	PublicKey []byte
+	Addr      string
+}
+
 // Resolver resolves handle names to peer info using a cached peer map.
 type Resolver struct {
 	mu       sync.RWMutex
 	handleTo map[string]PeerInfo // handle name -> peer info
+	relays   []RelayInfo
 }
 
 // NewResolver creates a new resolver.
@@ -56,6 +64,22 @@ func (r *Resolver) GetPeerMap() map[string]PeerInfo {
 	for k, v := range r.handleTo {
 		result[k] = v
 	}
+	return result
+}
+
+// UpdateRelays replaces the cached relay list.
+func (r *Resolver) UpdateRelays(relays []RelayInfo) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.relays = relays
+}
+
+// GetRelays returns a snapshot of the cached relay list.
+func (r *Resolver) GetRelays() []RelayInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]RelayInfo, len(r.relays))
+	copy(result, r.relays)
 	return result
 }
 

@@ -27,6 +27,36 @@ type DaemonConfig struct {
 	MetricsAddr   string `toml:"metrics_addr"`
 }
 
+// RelayConfig is the configuration for a relay server.
+type RelayConfig struct {
+	RelayID    string `toml:"relay_id"`
+	CoordAddr  string `toml:"coord_addr"`
+	ListenAddr string `toml:"listen_addr"`
+	KeyFile    string `toml:"key_file"`
+}
+
+// LoadRelayConfig loads a relay server config from a TOML file.
+func LoadRelayConfig(path string) (*RelayConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	var cfg RelayConfig
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if cfg.ListenAddr == "" {
+		cfg.ListenAddr = ":7443"
+	}
+	if cfg.CoordAddr == "" {
+		cfg.CoordAddr = "127.0.0.1:8443"
+	}
+	if cfg.KeyFile == "" {
+		cfg.KeyFile = "/var/lib/tailbus-relay/relay.key"
+	}
+	return &cfg, nil
+}
+
 // LoadCoordConfig loads a coordination server config from a TOML file.
 func LoadCoordConfig(path string) (*CoordConfig, error) {
 	data, err := os.ReadFile(path)

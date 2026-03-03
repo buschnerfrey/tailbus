@@ -20,6 +20,7 @@ message RegisterNodeRequest {
   repeated string handles = 4;
   map<string, string> handle_descriptions = 5 [deprecated = true];
   map<string, ServiceManifest> handle_manifests = 6;
+  bool is_relay = 7;
 }
 
 message RegisterNodeResponse {
@@ -34,6 +35,13 @@ message WatchPeerMapRequest {
 message PeerMapUpdate {
   repeated PeerInfo peers = 1;
   int64 version = 2;
+  repeated RelayInfo relays = 3;
+}
+
+message RelayInfo {
+  string node_id = 1;
+  bytes public_key = 2;
+  string addr = 3;
 }
 
 message PeerInfo {

@@ -17,6 +17,7 @@ build:
 	go build -o bin/tailbus-coord ./cmd/tailbus-coord
 	go build -o bin/tailbusd ./cmd/tailbusd
 	go build -o bin/tailbus ./cmd/tailbus
+	go build -o bin/tailbus-relay ./cmd/tailbus-relay
 
 test:
 	go test -race ./internal/... -count=1

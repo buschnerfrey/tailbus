@@ -25,6 +25,14 @@ builds:
     goos: [linux, darwin]
     goarch: [amd64, arm64]
 
+  - id: tailbus-relay
+    main: ./cmd/tailbus-relay
+    binary: tailbus-relay
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
 archives:
   - id: default
     format: tar.gz
@@ -33,6 +41,7 @@ archives:
       - tailbus-coord
       - tailbusd
       - tailbus
+      - tailbus-relay
 
 release:
   github:

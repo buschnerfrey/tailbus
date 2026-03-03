@@ -31,6 +31,7 @@ type RegisterNodeRequest struct {
 	// Deprecated: Marked as deprecated in tailbus/v1/coord.proto.
 	HandleDescriptions map[string]string                     `protobuf:"bytes,5,rep,name=handle_descriptions,json=handleDescriptions,proto3" json:"handle_descriptions,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	HandleManifests    map[string]*messagepb.ServiceManifest `protobuf:"bytes,6,rep,name=handle_manifests,json=handleManifests,proto3" json:"handle_manifests,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	IsRelay            bool                                  `protobuf:"varint,7,opt,name=is_relay,json=isRelay,proto3" json:"is_relay,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -106,6 +107,13 @@ func (x *RegisterNodeRequest) GetHandleManifests() map[string]*messagepb.Service
 		return x.HandleManifests
 	}
 	return nil
+}
+
+func (x *RegisterNodeRequest) GetIsRelay() bool {
+	if x != nil {
+		return x.IsRelay
+	}
+	return false
 }
 
 type RegisterNodeResponse struct {
@@ -208,6 +216,7 @@ type PeerMapUpdate struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Peers         []*PeerInfo            `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty"`
 	Version       int64                  `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
+	Relays        []*RelayInfo           `protobuf:"bytes,3,rep,name=relays,proto3" json:"relays,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -256,6 +265,73 @@ func (x *PeerMapUpdate) GetVersion() int64 {
 	return 0
 }
 
+func (x *PeerMapUpdate) GetRelays() []*RelayInfo {
+	if x != nil {
+		return x.Relays
+	}
+	return nil
+}
+
+type RelayInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	PublicKey     []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	Addr          string                 `protobuf:"bytes,3,opt,name=addr,proto3" json:"addr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RelayInfo) Reset() {
+	*x = RelayInfo{}
+	mi := &file_tailbus_v1_coord_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RelayInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RelayInfo) ProtoMessage() {}
+
+func (x *RelayInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_coord_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RelayInfo.ProtoReflect.Descriptor instead.
+func (*RelayInfo) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RelayInfo) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *RelayInfo) GetPublicKey() []byte {
+	if x != nil {
+		return x.PublicKey
+	}
+	return nil
+}
+
+func (x *RelayInfo) GetAddr() string {
+	if x != nil {
+		return x.Addr
+	}
+	return ""
+}
+
 type PeerInfo struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	NodeId            string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
@@ -272,7 +348,7 @@ type PeerInfo struct {
 
 func (x *PeerInfo) Reset() {
 	*x = PeerInfo{}
-	mi := &file_tailbus_v1_coord_proto_msgTypes[4]
+	mi := &file_tailbus_v1_coord_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -284,7 +360,7 @@ func (x *PeerInfo) String() string {
 func (*PeerInfo) ProtoMessage() {}
 
 func (x *PeerInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_coord_proto_msgTypes[4]
+	mi := &file_tailbus_v1_coord_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -297,7 +373,7 @@ func (x *PeerInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerInfo.ProtoReflect.Descriptor instead.
 func (*PeerInfo) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{4}
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *PeerInfo) GetNodeId() string {
@@ -359,7 +435,7 @@ type LookupHandleRequest struct {
 
 func (x *LookupHandleRequest) Reset() {
 	*x = LookupHandleRequest{}
-	mi := &file_tailbus_v1_coord_proto_msgTypes[5]
+	mi := &file_tailbus_v1_coord_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -371,7 +447,7 @@ func (x *LookupHandleRequest) String() string {
 func (*LookupHandleRequest) ProtoMessage() {}
 
 func (x *LookupHandleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_coord_proto_msgTypes[5]
+	mi := &file_tailbus_v1_coord_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -384,7 +460,7 @@ func (x *LookupHandleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LookupHandleRequest.ProtoReflect.Descriptor instead.
 func (*LookupHandleRequest) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{5}
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *LookupHandleRequest) GetHandle() string {
@@ -404,7 +480,7 @@ type LookupHandleResponse struct {
 
 func (x *LookupHandleResponse) Reset() {
 	*x = LookupHandleResponse{}
-	mi := &file_tailbus_v1_coord_proto_msgTypes[6]
+	mi := &file_tailbus_v1_coord_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -416,7 +492,7 @@ func (x *LookupHandleResponse) String() string {
 func (*LookupHandleResponse) ProtoMessage() {}
 
 func (x *LookupHandleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_coord_proto_msgTypes[6]
+	mi := &file_tailbus_v1_coord_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -429,7 +505,7 @@ func (x *LookupHandleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LookupHandleResponse.ProtoReflect.Descriptor instead.
 func (*LookupHandleResponse) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{6}
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *LookupHandleResponse) GetPeer() *PeerInfo {
@@ -459,7 +535,7 @@ type HeartbeatRequest struct {
 
 func (x *HeartbeatRequest) Reset() {
 	*x = HeartbeatRequest{}
-	mi := &file_tailbus_v1_coord_proto_msgTypes[7]
+	mi := &file_tailbus_v1_coord_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -471,7 +547,7 @@ func (x *HeartbeatRequest) String() string {
 func (*HeartbeatRequest) ProtoMessage() {}
 
 func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_coord_proto_msgTypes[7]
+	mi := &file_tailbus_v1_coord_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -484,7 +560,7 @@ func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatRequest.ProtoReflect.Descriptor instead.
 func (*HeartbeatRequest) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{7}
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HeartbeatRequest) GetNodeId() string {
@@ -525,7 +601,7 @@ type HeartbeatResponse struct {
 
 func (x *HeartbeatResponse) Reset() {
 	*x = HeartbeatResponse{}
-	mi := &file_tailbus_v1_coord_proto_msgTypes[8]
+	mi := &file_tailbus_v1_coord_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -537,7 +613,7 @@ func (x *HeartbeatResponse) String() string {
 func (*HeartbeatResponse) ProtoMessage() {}
 
 func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_coord_proto_msgTypes[8]
+	mi := &file_tailbus_v1_coord_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -550,7 +626,7 @@ func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatResponse.ProtoReflect.Descriptor instead.
 func (*HeartbeatResponse) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{8}
+	return file_tailbus_v1_coord_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *HeartbeatResponse) GetOk() bool {
@@ -565,7 +641,7 @@ var File_tailbus_v1_coord_proto protoreflect.FileDescriptor
 const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\n" +
 	"\x16tailbus/v1/coord.proto\x12\n" +
-	"tailbus.v1\x1a\x19tailbus/v1/messages.proto\"\x85\x04\n" +
+	"tailbus.v1\x1a\x19tailbus/v1/messages.proto\"\xa0\x04\n" +
 	"\x13RegisterNodeRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
@@ -573,7 +649,8 @@ const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\x0eadvertise_addr\x18\x03 \x01(\tR\radvertiseAddr\x12\x18\n" +
 	"\ahandles\x18\x04 \x03(\tR\ahandles\x12l\n" +
 	"\x13handle_descriptions\x18\x05 \x03(\v27.tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntryB\x02\x18\x01R\x12handleDescriptions\x12_\n" +
-	"\x10handle_manifests\x18\x06 \x03(\v24.tailbus.v1.RegisterNodeRequest.HandleManifestsEntryR\x0fhandleManifests\x1aE\n" +
+	"\x10handle_manifests\x18\x06 \x03(\v24.tailbus.v1.RegisterNodeRequest.HandleManifestsEntryR\x0fhandleManifests\x12\x19\n" +
+	"\bis_relay\x18\a \x01(\bR\aisRelay\x1aE\n" +
 	"\x17HandleDescriptionsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a_\n" +
@@ -584,10 +661,16 @@ const file_tailbus_v1_coord_proto_rawDesc = "" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\".\n" +
 	"\x13WatchPeerMapRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"U\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\x84\x01\n" +
 	"\rPeerMapUpdate\x12*\n" +
 	"\x05peers\x18\x01 \x03(\v2\x14.tailbus.v1.PeerInfoR\x05peers\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\x03R\aversion\"\x94\x04\n" +
+	"\aversion\x18\x02 \x01(\x03R\aversion\x12-\n" +
+	"\x06relays\x18\x03 \x03(\v2\x15.tailbus.v1.RelayInfoR\x06relays\"W\n" +
+	"\tRelayInfo\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x02 \x01(\fR\tpublicKey\x12\x12\n" +
+	"\x04addr\x18\x03 \x01(\tR\x04addr\"\x94\x04\n" +
 	"\bPeerInfo\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
 	"\n" +
@@ -639,50 +722,52 @@ func file_tailbus_v1_coord_proto_rawDescGZIP() []byte {
 	return file_tailbus_v1_coord_proto_rawDescData
 }
 
-var file_tailbus_v1_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_tailbus_v1_coord_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_tailbus_v1_coord_proto_goTypes = []any{
 	(*RegisterNodeRequest)(nil),       // 0: tailbus.v1.RegisterNodeRequest
 	(*RegisterNodeResponse)(nil),      // 1: tailbus.v1.RegisterNodeResponse
 	(*WatchPeerMapRequest)(nil),       // 2: tailbus.v1.WatchPeerMapRequest
 	(*PeerMapUpdate)(nil),             // 3: tailbus.v1.PeerMapUpdate
-	(*PeerInfo)(nil),                  // 4: tailbus.v1.PeerInfo
-	(*LookupHandleRequest)(nil),       // 5: tailbus.v1.LookupHandleRequest
-	(*LookupHandleResponse)(nil),      // 6: tailbus.v1.LookupHandleResponse
-	(*HeartbeatRequest)(nil),          // 7: tailbus.v1.HeartbeatRequest
-	(*HeartbeatResponse)(nil),         // 8: tailbus.v1.HeartbeatResponse
-	nil,                               // 9: tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
-	nil,                               // 10: tailbus.v1.RegisterNodeRequest.HandleManifestsEntry
-	nil,                               // 11: tailbus.v1.PeerInfo.HandleDescriptionsEntry
-	nil,                               // 12: tailbus.v1.PeerInfo.HandleManifestsEntry
-	nil,                               // 13: tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
-	nil,                               // 14: tailbus.v1.HeartbeatRequest.HandleManifestsEntry
-	(*messagepb.ServiceManifest)(nil), // 15: tailbus.v1.ServiceManifest
+	(*RelayInfo)(nil),                 // 4: tailbus.v1.RelayInfo
+	(*PeerInfo)(nil),                  // 5: tailbus.v1.PeerInfo
+	(*LookupHandleRequest)(nil),       // 6: tailbus.v1.LookupHandleRequest
+	(*LookupHandleResponse)(nil),      // 7: tailbus.v1.LookupHandleResponse
+	(*HeartbeatRequest)(nil),          // 8: tailbus.v1.HeartbeatRequest
+	(*HeartbeatResponse)(nil),         // 9: tailbus.v1.HeartbeatResponse
+	nil,                               // 10: tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
+	nil,                               // 11: tailbus.v1.RegisterNodeRequest.HandleManifestsEntry
+	nil,                               // 12: tailbus.v1.PeerInfo.HandleDescriptionsEntry
+	nil,                               // 13: tailbus.v1.PeerInfo.HandleManifestsEntry
+	nil,                               // 14: tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
+	nil,                               // 15: tailbus.v1.HeartbeatRequest.HandleManifestsEntry
+	(*messagepb.ServiceManifest)(nil), // 16: tailbus.v1.ServiceManifest
 }
 var file_tailbus_v1_coord_proto_depIdxs = []int32{
-	9,  // 0: tailbus.v1.RegisterNodeRequest.handle_descriptions:type_name -> tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
-	10, // 1: tailbus.v1.RegisterNodeRequest.handle_manifests:type_name -> tailbus.v1.RegisterNodeRequest.HandleManifestsEntry
-	4,  // 2: tailbus.v1.PeerMapUpdate.peers:type_name -> tailbus.v1.PeerInfo
-	11, // 3: tailbus.v1.PeerInfo.handle_descriptions:type_name -> tailbus.v1.PeerInfo.HandleDescriptionsEntry
-	12, // 4: tailbus.v1.PeerInfo.handle_manifests:type_name -> tailbus.v1.PeerInfo.HandleManifestsEntry
-	4,  // 5: tailbus.v1.LookupHandleResponse.peer:type_name -> tailbus.v1.PeerInfo
-	13, // 6: tailbus.v1.HeartbeatRequest.handle_descriptions:type_name -> tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
-	14, // 7: tailbus.v1.HeartbeatRequest.handle_manifests:type_name -> tailbus.v1.HeartbeatRequest.HandleManifestsEntry
-	15, // 8: tailbus.v1.RegisterNodeRequest.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
-	15, // 9: tailbus.v1.PeerInfo.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
-	15, // 10: tailbus.v1.HeartbeatRequest.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
-	0,  // 11: tailbus.v1.CoordinationAPI.RegisterNode:input_type -> tailbus.v1.RegisterNodeRequest
-	2,  // 12: tailbus.v1.CoordinationAPI.WatchPeerMap:input_type -> tailbus.v1.WatchPeerMapRequest
-	5,  // 13: tailbus.v1.CoordinationAPI.LookupHandle:input_type -> tailbus.v1.LookupHandleRequest
-	7,  // 14: tailbus.v1.CoordinationAPI.Heartbeat:input_type -> tailbus.v1.HeartbeatRequest
-	1,  // 15: tailbus.v1.CoordinationAPI.RegisterNode:output_type -> tailbus.v1.RegisterNodeResponse
-	3,  // 16: tailbus.v1.CoordinationAPI.WatchPeerMap:output_type -> tailbus.v1.PeerMapUpdate
-	6,  // 17: tailbus.v1.CoordinationAPI.LookupHandle:output_type -> tailbus.v1.LookupHandleResponse
-	8,  // 18: tailbus.v1.CoordinationAPI.Heartbeat:output_type -> tailbus.v1.HeartbeatResponse
-	15, // [15:19] is the sub-list for method output_type
-	11, // [11:15] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	10, // 0: tailbus.v1.RegisterNodeRequest.handle_descriptions:type_name -> tailbus.v1.RegisterNodeRequest.HandleDescriptionsEntry
+	11, // 1: tailbus.v1.RegisterNodeRequest.handle_manifests:type_name -> tailbus.v1.RegisterNodeRequest.HandleManifestsEntry
+	5,  // 2: tailbus.v1.PeerMapUpdate.peers:type_name -> tailbus.v1.PeerInfo
+	4,  // 3: tailbus.v1.PeerMapUpdate.relays:type_name -> tailbus.v1.RelayInfo
+	12, // 4: tailbus.v1.PeerInfo.handle_descriptions:type_name -> tailbus.v1.PeerInfo.HandleDescriptionsEntry
+	13, // 5: tailbus.v1.PeerInfo.handle_manifests:type_name -> tailbus.v1.PeerInfo.HandleManifestsEntry
+	5,  // 6: tailbus.v1.LookupHandleResponse.peer:type_name -> tailbus.v1.PeerInfo
+	14, // 7: tailbus.v1.HeartbeatRequest.handle_descriptions:type_name -> tailbus.v1.HeartbeatRequest.HandleDescriptionsEntry
+	15, // 8: tailbus.v1.HeartbeatRequest.handle_manifests:type_name -> tailbus.v1.HeartbeatRequest.HandleManifestsEntry
+	16, // 9: tailbus.v1.RegisterNodeRequest.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
+	16, // 10: tailbus.v1.PeerInfo.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
+	16, // 11: tailbus.v1.HeartbeatRequest.HandleManifestsEntry.value:type_name -> tailbus.v1.ServiceManifest
+	0,  // 12: tailbus.v1.CoordinationAPI.RegisterNode:input_type -> tailbus.v1.RegisterNodeRequest
+	2,  // 13: tailbus.v1.CoordinationAPI.WatchPeerMap:input_type -> tailbus.v1.WatchPeerMapRequest
+	6,  // 14: tailbus.v1.CoordinationAPI.LookupHandle:input_type -> tailbus.v1.LookupHandleRequest
+	8,  // 15: tailbus.v1.CoordinationAPI.Heartbeat:input_type -> tailbus.v1.HeartbeatRequest
+	1,  // 16: tailbus.v1.CoordinationAPI.RegisterNode:output_type -> tailbus.v1.RegisterNodeResponse
+	3,  // 17: tailbus.v1.CoordinationAPI.WatchPeerMap:output_type -> tailbus.v1.PeerMapUpdate
+	7,  // 18: tailbus.v1.CoordinationAPI.LookupHandle:output_type -> tailbus.v1.LookupHandleResponse
+	9,  // 19: tailbus.v1.CoordinationAPI.Heartbeat:output_type -> tailbus.v1.HeartbeatResponse
+	16, // [16:20] is the sub-list for method output_type
+	12, // [12:16] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_tailbus_v1_coord_proto_init() }
@@ -696,7 +781,7 @@ func file_tailbus_v1_coord_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tailbus_v1_coord_proto_rawDesc), len(file_tailbus_v1_coord_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -40,7 +40,16 @@ func (pm *PeerMap) Build() (*pb.PeerMapUpdate, error) {
 	}
 
 	var peers []*pb.PeerInfo
+	var relays []*pb.RelayInfo
 	for _, n := range nodes {
+		if n.IsRelay {
+			relays = append(relays, &pb.RelayInfo{
+				NodeId:    n.NodeID,
+				PublicKey: n.PublicKey,
+				Addr:      n.AdvertiseAddr,
+			})
+			continue
+		}
 		// Build deprecated HandleDescriptions from manifests for backward compat
 		descs := make(map[string]string, len(n.HandleManifests))
 		for h, m := range n.HandleManifests {
@@ -62,14 +71,15 @@ func (pm *PeerMap) Build() (*pb.PeerMapUpdate, error) {
 	ver := pm.version.Add(1)
 	return &pb.PeerMapUpdate{
 		Peers:   peers,
+		Relays:  relays,
 		Version: ver,
 	}, nil
 }
 
-// peerHash computes a hash of the peer topology (node IDs, addresses, handles).
-// Deliberately excludes heartbeat timestamps so that heartbeats alone don't
-// trigger broadcasts.
-func peerHash(peers []*pb.PeerInfo) string {
+// peerHash computes a hash of the peer topology (node IDs, addresses, handles)
+// and relay info. Deliberately excludes heartbeat timestamps so that heartbeats
+// alone don't trigger broadcasts.
+func peerHash(peers []*pb.PeerInfo, relays []*pb.RelayInfo) string {
 	// Sort by node ID for deterministic hashing
 	sorted := make([]*pb.PeerInfo, len(peers))
 	copy(sorted, peers)
@@ -84,6 +94,17 @@ func peerHash(peers []*pb.PeerInfo) string {
 		sort.Strings(handles)
 		fmt.Fprintf(h, "%s|%s|%s\n", p.NodeId, p.AdvertiseAddr, strings.Join(handles, ","))
 	}
+
+	// Include relay info in hash
+	sortedRelays := make([]*pb.RelayInfo, len(relays))
+	copy(sortedRelays, relays)
+	sort.Slice(sortedRelays, func(i, j int) bool {
+		return sortedRelays[i].NodeId < sortedRelays[j].NodeId
+	})
+	for _, r := range sortedRelays {
+		fmt.Fprintf(h, "relay|%s|%s\n", r.NodeId, r.Addr)
+	}
+
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
@@ -116,7 +137,7 @@ func (pm *PeerMap) Broadcast() error {
 		return err
 	}
 
-	hash := peerHash(update.Peers)
+	hash := peerHash(update.Peers, update.Relays)
 
 	pm.mu.Lock()
 	if hash == pm.lastHash {
@@ -147,7 +168,7 @@ func (pm *PeerMap) ForceBroadcast() error {
 	}
 
 	// Update the hash so subsequent Broadcast() calls see the new state
-	hash := peerHash(update.Peers)
+	hash := peerHash(update.Peers, update.Relays)
 	pm.mu.Lock()
 	pm.lastHash = hash
 	pm.mu.Unlock()

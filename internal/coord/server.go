@@ -130,7 +130,7 @@ func (s *Server) RegisterNode(_ context.Context, req *pb.RegisterNodeRequest) (*
 		manifests = synthesizeManifests(req.HandleDescriptions)
 	}
 
-	if err := s.registry.RegisterNode(req.NodeId, req.PublicKey, req.AdvertiseAddr, req.Handles, manifests); err != nil {
+	if err := s.registry.RegisterNode(req.NodeId, req.PublicKey, req.AdvertiseAddr, req.Handles, manifests, req.IsRelay); err != nil {
 		return &pb.RegisterNodeResponse{Ok: false, Error: err.Error()}, nil
 	}
 

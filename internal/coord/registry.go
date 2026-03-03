@@ -20,8 +20,8 @@ func NewRegistry(store *Store, logger *slog.Logger) *Registry {
 }
 
 // RegisterNode registers a node and its handles. Returns an error if any handle is
-// already claimed by a different node.
-func (r *Registry) RegisterNode(nodeID string, pubKey []byte, addr string, handles []string, manifests map[string]*messagepb.ServiceManifest) error {
+// already claimed by a different node. If isRelay is true the node is a relay server.
+func (r *Registry) RegisterNode(nodeID string, pubKey []byte, addr string, handles []string, manifests map[string]*messagepb.ServiceManifest, isRelay bool) error {
 	// Check for handle conflicts
 	for _, h := range handles {
 		rec, err := r.store.LookupHandle(h)
@@ -40,6 +40,7 @@ func (r *Registry) RegisterNode(nodeID string, pubKey []byte, addr string, handl
 		Handles:         handles,
 		HandleManifests: manifests,
 		LastHeartbeat:   time.Now(),
+		IsRelay:         isRelay,
 	}
 	if err := r.store.UpsertNode(rec); err != nil {
 		return fmt.Errorf("upsert node: %w", err)

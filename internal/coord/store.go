@@ -18,6 +18,7 @@ type NodeRecord struct {
 	Handles         []string
 	HandleManifests map[string]*messagepb.ServiceManifest
 	LastHeartbeat   time.Time
+	IsRelay         bool
 }
 
 // Store provides SQLite persistence for the coordination server.
@@ -60,6 +61,7 @@ func (s *Store) migrate() error {
 	// Additive migrations for existing databases.
 	s.db.Exec("ALTER TABLE handles ADD COLUMN description TEXT NOT NULL DEFAULT ''")
 	s.db.Exec("ALTER TABLE handles ADD COLUMN manifest TEXT NOT NULL DEFAULT '{}'")
+	s.db.Exec("ALTER TABLE nodes ADD COLUMN is_relay INTEGER NOT NULL DEFAULT 0")
 	return nil
 }
 
@@ -93,14 +95,19 @@ func (s *Store) UpsertNode(rec *NodeRecord) error {
 	}
 	defer tx.Rollback()
 
+	isRelay := 0
+	if rec.IsRelay {
+		isRelay = 1
+	}
 	_, err = tx.Exec(`
-		INSERT INTO nodes (node_id, public_key, advertise_addr, last_heartbeat)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO nodes (node_id, public_key, advertise_addr, last_heartbeat, is_relay)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(node_id) DO UPDATE SET
 			public_key = excluded.public_key,
 			advertise_addr = excluded.advertise_addr,
-			last_heartbeat = excluded.last_heartbeat
-	`, rec.NodeID, rec.PublicKey, rec.AdvertiseAddr, rec.LastHeartbeat.Unix())
+			last_heartbeat = excluded.last_heartbeat,
+			is_relay = excluded.is_relay
+	`, rec.NodeID, rec.PublicKey, rec.AdvertiseAddr, rec.LastHeartbeat.Unix(), isRelay)
 	if err != nil {
 		return err
 	}
@@ -174,7 +181,7 @@ func (s *Store) UpdateHeartbeat(nodeID string, handles []string, manifests map[s
 
 // GetAllNodes returns all registered nodes with their handles.
 func (s *Store) GetAllNodes() ([]*NodeRecord, error) {
-	rows, err := s.db.Query("SELECT node_id, public_key, advertise_addr, last_heartbeat FROM nodes")
+	rows, err := s.db.Query("SELECT node_id, public_key, advertise_addr, last_heartbeat, is_relay FROM nodes")
 	if err != nil {
 		return nil, err
 	}
@@ -185,10 +192,12 @@ func (s *Store) GetAllNodes() ([]*NodeRecord, error) {
 	for rows.Next() {
 		var rec NodeRecord
 		var ts int64
-		if err := rows.Scan(&rec.NodeID, &rec.PublicKey, &rec.AdvertiseAddr, &ts); err != nil {
+		var isRelay int
+		if err := rows.Scan(&rec.NodeID, &rec.PublicKey, &rec.AdvertiseAddr, &ts, &isRelay); err != nil {
 			return nil, err
 		}
 		rec.LastHeartbeat = time.Unix(ts, 0)
+		rec.IsRelay = isRelay != 0
 		nodeMap[rec.NodeID] = &rec
 		nodes = append(nodes, &rec)
 	}

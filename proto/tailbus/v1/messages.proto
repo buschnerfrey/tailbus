@@ -24,6 +24,7 @@ message Envelope {
   string trace_id = 9;
   uint64 sequence = 10;
   string ack_id = 11;
+  bytes relay_target_key = 12;  // Target node pubkey (set by sender when routing via relay)
 }
 
 message CommandSpec {

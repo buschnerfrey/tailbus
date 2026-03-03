@@ -16,9 +16,14 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
               |    (node-1)     |  |    (node-2)     |
               |  P2P gRPC <----|--|----> P2P gRPC   |
               +--------+--------+  +--------+--------+
-                 Unix socket          Unix socket
-                /     \                /     \
-           agent-a   agent-b     agent-c   agent-d
+                 |  Unix socket     Unix socket  |
+                /     \      \      /     \       \
+           agent-a   agent-b  \    /  agent-c   agent-d
+                               +--+
+                          +--------+--------+
+                          | tailbus-relay   |
+                          | (NAT fallback)  |
+                          +-----------------+
 ```
 
 ## Features
@@ -31,7 +36,8 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **Distributed message tracing** — every session gets a `trace_id`; spans are recorded at each hop (created, routed, sent, received, delivered)
 - **Prometheus metrics** — counter and histogram metrics exported at `/metrics` for external monitoring
 - **Real-time TUI dashboard** — terminal dashboard showing handles, peers, sessions, and live activity
-- **mTLS everywhere** — all P2P and daemon-to-coord connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
+- **DERP-style relay** — when peers can't reach each other directly (NAT, firewalls, different VPCs), messages are transparently forwarded through a relay server; daemons try direct P2P first and fall back automatically
+- **mTLS everywhere** — all P2P, relay, and daemon-to-coord connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
 - **Per-connection handle binding** — each gRPC connection owns its registered handles; RPCs enforce `from_handle` ownership; handles auto-cleanup on disconnect
 - **Sequence numbers** — every envelope gets a per-session monotonic sequence number for ordering
 - **Delivery ACKs with retry** — successful delivery generates an ACK back to sender; unacknowledged messages retry with backoff (5s timeout, 3 max retries)
@@ -57,13 +63,14 @@ This detects your OS/architecture, downloads the latest release, and installs al
 make build
 ```
 
-This produces three binaries in `bin/`:
+This produces four binaries in `bin/`:
 
 | Binary | Description |
 |--------|-------------|
 | `bin/tailbus-coord` | Coordination server (discovery + peer map) |
 | `bin/tailbusd` | Node daemon (local agent server + P2P transport) |
 | `bin/tailbus` | CLI tool for interacting with a local daemon |
+| `bin/tailbus-relay` | Relay server for NAT traversal |
 
 Other Makefile targets:
 
@@ -108,6 +115,22 @@ Or using flags directly:
   -listen :9443 \
   -socket /tmp/tailbusd-1.sock
 ```
+
+### (Optional) Start a relay server
+
+If daemons are behind NAT or can't reach each other directly, start a relay:
+
+```bash
+./bin/tailbus-relay -listen :7443 -coord 127.0.0.1:8443
+```
+
+Or with a config file:
+
+```bash
+./bin/tailbus-relay -config examples/dev/relay.toml
+```
+
+The relay registers with the coord server and appears in the peer map. Daemons discover it automatically and fall back to it when direct P2P connections fail.
 
 ### 3. Register agents and exchange messages
 
@@ -198,6 +221,22 @@ key_file = "/tmp/tailbus-coord/coord.key"
 | `listen_addr` | `:8443` | gRPC listen address |
 | `data_dir` | `.` | Directory for SQLite database (pure-Go, no CGo) |
 | `key_file` | `{data_dir}/coord.key` | Coord keypair file for mTLS (auto-generated if missing) |
+
+### Relay server (`tailbus-relay`)
+
+```toml
+relay_id = "relay-1"
+coord_addr = "127.0.0.1:8443"
+listen_addr = ":7443"
+key_file = "/tmp/tailbus-relay.key"
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `relay_id` | `relay-{hostname}` | Unique identifier for this relay |
+| `coord_addr` | `127.0.0.1:8443` | Coordination server address |
+| `listen_addr` | `:7443` | gRPC listen address for daemon connections |
+| `key_file` | `/tmp/tailbus-relay-{id}.key` | Relay keypair file (auto-generated if missing) |
 
 ### Node daemon (`tailbusd`)
 
@@ -358,8 +397,11 @@ internal/
 
   transport/                P2P data plane
     transport.go              Transport interface
-    grpc.go                   Bidirectional gRPC stream implementation (mTLS)
-    peerverifier.go           Peer certificate verification against peer map
+    grpc.go                   Bidirectional gRPC stream implementation (mTLS + relay fallback)
+    peerverifier.go           Peer certificate verification against peer map + relays
+
+  relay/                    NAT traversal relay
+    server.go                 DERP-style relay: Exchange handler, stream mapping, forwarding
 
   handle/                   Handle resolution
   session/                  Session lifecycle state machine (with sequence counters)
@@ -374,9 +416,10 @@ internal/
 3. `MessageRouter` checks if destination handle is local:
    - **Local**: delivers directly to subscriber channels, records `ROUTED_LOCAL` span
    - **Remote**: resolves handle to peer address via `Resolver`, sends via `GRPCTransport` (mTLS), records `ROUTED_REMOTE` span, registers with `AckTracker`
-4. `GRPCTransport` sends over bidirectional mTLS gRPC stream, fires `OnSend` callback (`SENT_TO_TRANSPORT` span)
-5. Remote daemon receives via `OnReceive` callback (`RECEIVED_FROM_TRANSPORT` span), delivers to local subscribers (`DELIVERED_TO_SUBSCRIBER` span)
-6. On successful delivery, an `ACK` envelope is sent back to the sender; the `AckTracker` removes the message from pending. Unacknowledged messages are retried (5s timeout, up to 3 retries)
+4. `GRPCTransport` attempts direct P2P first. On failure, falls back to relay (stamps `relay_target_key` on the envelope). Failed direct addresses are cached for 60s.
+5. Direct or relay: fires `OnSend` callback (`SENT_TO_TRANSPORT` span)
+6. Remote daemon receives via `OnReceive` callback (`RECEIVED_FROM_TRANSPORT` span), delivers to local subscribers (`DELIVERED_TO_SUBSCRIBER` span)
+7. On successful delivery, an `ACK` envelope is sent back to the sender; the `AckTracker` removes the message from pending. Unacknowledged messages are retried (5s timeout, up to 3 retries)
 
 ### Protocol
 
@@ -384,7 +427,7 @@ All inter-component communication uses **gRPC** with Protocol Buffers:
 
 - **AgentAPI** — agents connect to their local daemon via **Unix socket** (with per-connection handle ownership enforcement)
 - **CoordinationAPI** — daemons connect to the coord server via **mTLS over TCP** (TOFU cert pinning on first connect)
-- **NodeTransport** — daemons connect to each other via **mTLS over TCP** (peer certs verified against the peer map)
+- **NodeTransport** — daemons connect to each other via **mTLS over TCP** (peer certs verified against the peer map); when direct connection fails, daemons connect to a relay server using the same `Exchange` stream and mTLS
 
 ## Stdio Agent Bridge
 
@@ -562,9 +605,10 @@ goreleaser build --snapshot --clean
 
 ```bash
 go test ./internal/ -v -run TestEndToEnd
+go test ./internal/ -v -run TestRelayEndToEnd
 ```
 
-The integration test spins up a full topology (coord server + 2 daemons + 2 agents) in-process and verifies the complete session lifecycle including tracing.
+The integration tests spin up full topologies in-process: `TestEndToEnd` verifies the complete session lifecycle with direct P2P (coord + 2 daemons + 2 agents), and `TestRelayEndToEnd` verifies message delivery through the relay when direct P2P is unreachable.
 
 ## License
 

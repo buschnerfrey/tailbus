@@ -55,6 +55,7 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 
 	// Create transport with mTLS
 	tp := transport.NewGRPCTransport(logger, &cert, verifier)
+	tp.SetResolver(resolver)
 
 	activity := NewActivityBus()
 	traceStore := NewTraceStore(10000)
@@ -128,6 +129,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	d.coordClient = cc
 	defer cc.Close()
+
+	// Proactively connect to relays when relay info updates
+	cc.SetOnRelayUpdate(func() { d.transport.ConnectToRelays() })
 
 	// Register with coord (retries with exponential backoff)
 	if err := registerWithRetry(ctx, cc, d.logger); err != nil {

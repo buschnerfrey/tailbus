@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	transportpb "github.com/alexanderfrey/tailbus/api/transportpb"
+	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/identity"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -32,6 +34,11 @@ type GRPCTransport struct {
 	mu    sync.Mutex
 	peers map[string]*peerConn // addr -> peer connection
 	ctx   context.Context      // daemon lifetime context
+
+	resolver    *handle.Resolver           // for relay addr lookup + pubkey reverse-lookup
+	relayMu     sync.Mutex
+	relayConns  map[string]*peerConn       // relay addr → connection
+	directFails map[string]time.Time       // peer addr → last direct failure time
 }
 
 type peerConn struct {
@@ -44,11 +51,13 @@ type peerConn struct {
 // If cert and verifier are provided, mTLS is enabled.
 func NewGRPCTransport(logger *slog.Logger, cert *tls.Certificate, verifier PeerVerifier) *GRPCTransport {
 	t := &GRPCTransport{
-		logger:   logger,
-		tlsCert:  cert,
-		verifier: verifier,
-		peers:    make(map[string]*peerConn),
-		ctx:      context.Background(), // default until Start() is called
+		logger:      logger,
+		tlsCert:     cert,
+		verifier:    verifier,
+		peers:       make(map[string]*peerConn),
+		ctx:         context.Background(), // default until Start() is called
+		relayConns:  make(map[string]*peerConn),
+		directFails: make(map[string]time.Time),
 	}
 
 	var serverOpts []grpc.ServerOption
@@ -100,9 +109,46 @@ func (t *GRPCTransport) OnSend(fn func(*messagepb.Envelope)) {
 	t.sendFn = fn
 }
 
+// SetResolver sets the resolver used for relay address and pubkey lookup.
+func (t *GRPCTransport) SetResolver(r *handle.Resolver) {
+	t.resolver = r
+}
+
+const directFailTTL = 60 * time.Second
+
 // Send sends an envelope to a peer. Establishes connection lazily.
-// On send failure, reconnects under the same lock to avoid races.
+// On send failure, falls back to relay if available.
 func (t *GRPCTransport) Send(addr string, env *messagepb.Envelope) error {
+	// Check if direct connection to this addr recently failed
+	t.relayMu.Lock()
+	failTime, directFailed := t.directFails[addr]
+	if directFailed && time.Since(failTime) > directFailTTL {
+		delete(t.directFails, addr)
+		directFailed = false
+	}
+	t.relayMu.Unlock()
+
+	if !directFailed {
+		err := t.sendDirect(addr, env)
+		if err == nil {
+			return nil
+		}
+		// Record direct failure and try relay
+		t.relayMu.Lock()
+		t.directFails[addr] = time.Now()
+		t.relayMu.Unlock()
+		t.logger.Debug("direct send failed, trying relay", "addr", addr, "error", err)
+	}
+
+	// Relay fallback
+	if t.resolver == nil {
+		return fmt.Errorf("direct send to %s failed and no resolver for relay fallback", addr)
+	}
+	return t.sendViaRelay(addr, env)
+}
+
+// sendDirect sends an envelope directly to a peer (original Send logic).
+func (t *GRPCTransport) sendDirect(addr string, env *messagepb.Envelope) error {
 	pc, err := t.getOrConnect(addr)
 	if err != nil {
 		return err
@@ -144,6 +190,154 @@ func (t *GRPCTransport) Send(addr string, env *messagepb.Envelope) error {
 		t.sendFn(env)
 	}
 	return nil
+}
+
+// sendViaRelay sends an envelope through a relay server.
+func (t *GRPCTransport) sendViaRelay(peerAddr string, env *messagepb.Envelope) error {
+	// Look up the target's pubkey from the resolver by matching addr
+	targetKey := t.pubkeyForAddr(peerAddr)
+	if targetKey == nil {
+		return fmt.Errorf("cannot find pubkey for peer %s for relay routing", peerAddr)
+	}
+
+	// Stamp relay target key on the envelope
+	env.RelayTargetKey = targetKey
+
+	relays := t.resolver.GetRelays()
+	if len(relays) == 0 {
+		return fmt.Errorf("no relays available for fallback to %s", peerAddr)
+	}
+
+	// Try first available relay
+	for _, relay := range relays {
+		pc, err := t.getOrConnectRelay(relay.Addr)
+		if err != nil {
+			t.logger.Warn("relay connection failed", "relay", relay.Addr, "error", err)
+			continue
+		}
+		pc.mu.Lock()
+		err = pc.stream.Send(env)
+		pc.mu.Unlock()
+		if err != nil {
+			t.logger.Warn("relay send failed", "relay", relay.Addr, "error", err)
+			continue
+		}
+		if t.sendFn != nil {
+			t.sendFn(env)
+		}
+		t.logger.Debug("sent via relay", "relay", relay.Addr, "target", peerAddr)
+		return nil
+	}
+	return fmt.Errorf("all relays failed for %s", peerAddr)
+}
+
+// pubkeyForAddr finds a peer's public key by matching their advertise address.
+func (t *GRPCTransport) pubkeyForAddr(addr string) []byte {
+	if t.resolver == nil {
+		return nil
+	}
+	peerMap := t.resolver.GetPeerMap()
+	for _, info := range peerMap {
+		if info.AdvertiseAddr == addr {
+			return info.PublicKey
+		}
+	}
+	return nil
+}
+
+// getOrConnectRelay returns an existing or new relay connection.
+func (t *GRPCTransport) getOrConnectRelay(addr string) (*peerConn, error) {
+	t.relayMu.Lock()
+	defer t.relayMu.Unlock()
+
+	if pc, ok := t.relayConns[addr]; ok {
+		return pc, nil
+	}
+
+	pc, err := t.connectRelay(addr)
+	if err != nil {
+		return nil, err
+	}
+	t.relayConns[addr] = pc
+	return pc, nil
+}
+
+// connectRelay creates a new relay connection. Must be called with relayMu held.
+func (t *GRPCTransport) connectRelay(addr string) (*peerConn, error) {
+	var dialOpt grpc.DialOption
+	if t.tlsCert != nil {
+		clientTLS := &tls.Config{
+			Certificates:       []tls.Certificate{*t.tlsCert},
+			InsecureSkipVerify: true,
+			VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+				if t.verifier == nil || len(rawCerts) == 0 {
+					return nil
+				}
+				pubKey, err := identity.PubKeyFromCert(rawCerts[0])
+				if err != nil {
+					return fmt.Errorf("extract relay key: %w", err)
+				}
+				return t.verifier.VerifyPeerKey(addr, pubKey)
+			},
+		}
+		dialOpt = grpc.WithTransportCredentials(credentials.NewTLS(clientTLS))
+	} else {
+		dialOpt = grpc.WithTransportCredentials(insecure.NewCredentials())
+	}
+
+	conn, err := grpc.NewClient(addr, dialOpt)
+	if err != nil {
+		return nil, fmt.Errorf("dial relay %s: %w", addr, err)
+	}
+
+	client := transportpb.NewNodeTransportClient(conn)
+	stream, err := client.Exchange(t.ctx)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("open exchange stream to relay %s: %w", addr, err)
+	}
+
+	pc := &peerConn{conn: conn, stream: stream}
+	go t.relayRecvLoop(addr, pc, stream)
+
+	t.logger.Info("connected to relay", "addr", addr)
+	return pc, nil
+}
+
+// relayRecvLoop receives envelopes from a relay connection.
+func (t *GRPCTransport) relayRecvLoop(addr string, pc *peerConn, stream transportpb.NodeTransport_ExchangeClient) {
+	for {
+		env, err := stream.Recv()
+		if err != nil {
+			t.logger.Debug("relay stream closed", "addr", addr, "error", err)
+			t.relayMu.Lock()
+			if current, ok := t.relayConns[addr]; ok && current == pc {
+				delete(t.relayConns, addr)
+				t.logger.Info("removed stale relay conn", "addr", addr)
+			}
+			t.relayMu.Unlock()
+			return
+		}
+		// Clear relay_target_key before delivering (it was for the relay)
+		env.RelayTargetKey = nil
+		if t.receiveFn != nil {
+			t.receiveFn(env)
+		}
+	}
+}
+
+// ConnectToRelays proactively connects to all known relays so this node
+// can receive forwarded messages. Should be called after relay info updates.
+func (t *GRPCTransport) ConnectToRelays() {
+	if t.resolver == nil {
+		return
+	}
+	relays := t.resolver.GetRelays()
+	for _, r := range relays {
+		if _, err := t.getOrConnectRelay(r.Addr); err != nil {
+			t.logger.Warn("failed to connect to relay", "addr", r.Addr, "error", err)
+		}
+	}
 }
 
 func (t *GRPCTransport) getOrConnect(addr string) (*peerConn, error) {
@@ -260,6 +454,13 @@ func (t *GRPCTransport) Close() error {
 		delete(t.peers, addr)
 	}
 	t.mu.Unlock()
+	// Close relay connections
+	t.relayMu.Lock()
+	for addr, pc := range t.relayConns {
+		pc.conn.Close()
+		delete(t.relayConns, addr)
+	}
+	t.relayMu.Unlock()
 	// Force stop the server (GracefulStop can hang with open streams)
 	t.grpcSrv.Stop()
 	return nil

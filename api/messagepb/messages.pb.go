@@ -77,20 +77,21 @@ func (EnvelopeType) EnumDescriptor() ([]byte, []int) {
 }
 
 type Envelope struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MessageId     string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	FromHandle    string                 `protobuf:"bytes,3,opt,name=from_handle,json=fromHandle,proto3" json:"from_handle,omitempty"`
-	ToHandle      string                 `protobuf:"bytes,4,opt,name=to_handle,json=toHandle,proto3" json:"to_handle,omitempty"`
-	Payload       []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
-	ContentType   string                 `protobuf:"bytes,6,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
-	SentAtUnix    int64                  `protobuf:"varint,7,opt,name=sent_at_unix,json=sentAtUnix,proto3" json:"sent_at_unix,omitempty"`
-	Type          EnvelopeType           `protobuf:"varint,8,opt,name=type,proto3,enum=tailbus.v1.EnvelopeType" json:"type,omitempty"`
-	TraceId       string                 `protobuf:"bytes,9,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
-	Sequence      uint64                 `protobuf:"varint,10,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	AckId         string                 `protobuf:"bytes,11,opt,name=ack_id,json=ackId,proto3" json:"ack_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	MessageId      string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	SessionId      string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	FromHandle     string                 `protobuf:"bytes,3,opt,name=from_handle,json=fromHandle,proto3" json:"from_handle,omitempty"`
+	ToHandle       string                 `protobuf:"bytes,4,opt,name=to_handle,json=toHandle,proto3" json:"to_handle,omitempty"`
+	Payload        []byte                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
+	ContentType    string                 `protobuf:"bytes,6,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
+	SentAtUnix     int64                  `protobuf:"varint,7,opt,name=sent_at_unix,json=sentAtUnix,proto3" json:"sent_at_unix,omitempty"`
+	Type           EnvelopeType           `protobuf:"varint,8,opt,name=type,proto3,enum=tailbus.v1.EnvelopeType" json:"type,omitempty"`
+	TraceId        string                 `protobuf:"bytes,9,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
+	Sequence       uint64                 `protobuf:"varint,10,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	AckId          string                 `protobuf:"bytes,11,opt,name=ack_id,json=ackId,proto3" json:"ack_id,omitempty"`
+	RelayTargetKey []byte                 `protobuf:"bytes,12,opt,name=relay_target_key,json=relayTargetKey,proto3" json:"relay_target_key,omitempty"` // Target node pubkey (set by sender when routing via relay)
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Envelope) Reset() {
@@ -198,6 +199,13 @@ func (x *Envelope) GetAckId() string {
 		return x.AckId
 	}
 	return ""
+}
+
+func (x *Envelope) GetRelayTargetKey() []byte {
+	if x != nil {
+		return x.RelayTargetKey
+	}
+	return nil
 }
 
 type CommandSpec struct {
@@ -333,7 +341,7 @@ var File_tailbus_v1_messages_proto protoreflect.FileDescriptor
 const file_tailbus_v1_messages_proto_rawDesc = "" +
 	"\n" +
 	"\x19tailbus/v1/messages.proto\x12\n" +
-	"tailbus.v1\"\xe1\x02\n" +
+	"tailbus.v1\"\x8b\x03\n" +
 	"\bEnvelope\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1d\n" +
@@ -350,7 +358,8 @@ const file_tailbus_v1_messages_proto_rawDesc = "" +
 	"\btrace_id\x18\t \x01(\tR\atraceId\x12\x1a\n" +
 	"\bsequence\x18\n" +
 	" \x01(\x04R\bsequence\x12\x15\n" +
-	"\x06ack_id\x18\v \x01(\tR\x05ackId\"p\n" +
+	"\x06ack_id\x18\v \x01(\tR\x05ackId\x12(\n" +
+	"\x10relay_target_key\x18\f \x01(\fR\x0erelayTargetKey\"p\n" +
 	"\vCommandSpec\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12+\n" +

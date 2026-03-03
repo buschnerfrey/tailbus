@@ -22,10 +22,10 @@ func NewResolverVerifier(resolver *handle.Resolver) *ResolverVerifier {
 	return &ResolverVerifier{resolver: resolver}
 }
 
-// VerifyPeerKey checks that the public key belongs to a known peer.
+// VerifyPeerKey checks that the public key belongs to a known peer or relay.
 // If addr is non-empty, it finds the peer by address and compares keys.
 // If addr is empty (server-side inbound), it checks that the key exists
-// anywhere in the peer map.
+// anywhere in the peer map or relay list.
 func (v *ResolverVerifier) VerifyPeerKey(addr string, pubKey []byte) error {
 	peerMap := v.resolver.GetPeerMap()
 
@@ -39,12 +39,27 @@ func (v *ResolverVerifier) VerifyPeerKey(addr string, pubKey []byte) error {
 				return fmt.Errorf("peer %s key mismatch", addr)
 			}
 		}
+		// Check relays by address
+		for _, relay := range v.resolver.GetRelays() {
+			if relay.Addr == addr {
+				if bytes.Equal(relay.PublicKey, pubKey) {
+					return nil
+				}
+				return fmt.Errorf("relay %s key mismatch", addr)
+			}
+		}
 		return fmt.Errorf("peer %s not found in peer map", addr)
 	}
 
-	// Server-side: verify pubkey exists anywhere
+	// Server-side: verify pubkey exists anywhere in peers
 	for _, info := range peerMap {
 		if bytes.Equal(info.PublicKey, pubKey) {
+			return nil
+		}
+	}
+	// Also check relays
+	for _, relay := range v.resolver.GetRelays() {
+		if bytes.Equal(relay.PublicKey, pubKey) {
 			return nil
 		}
 	}

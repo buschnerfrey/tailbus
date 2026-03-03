@@ -18,13 +18,15 @@ import (
 
 // CoordClient connects to the coordination server for registration and peer map updates.
 type CoordClient struct {
-	conn     *grpc.ClientConn
-	client   pb.CoordinationAPIClient
-	nodeID   string
-	pubKey   []byte
-	addr     string
-	logger   *slog.Logger
-	resolver *handle.Resolver
+	conn          *grpc.ClientConn
+	client        pb.CoordinationAPIClient
+	nodeID        string
+	pubKey        []byte
+	addr          string
+	isRelay       bool
+	logger        *slog.Logger
+	resolver      *handle.Resolver
+	onRelayUpdate func() // called after relay info is updated
 }
 
 // NewCoordClient creates a new coordination client.
@@ -64,6 +66,16 @@ func NewCoordClient(coordAddr, nodeID string, pubKey []byte, advertiseAddr strin
 	}, nil
 }
 
+// SetIsRelay marks this client as a relay node for registration.
+func (c *CoordClient) SetIsRelay(isRelay bool) {
+	c.isRelay = isRelay
+}
+
+// SetOnRelayUpdate sets a callback invoked after relay info is updated from the peer map.
+func (c *CoordClient) SetOnRelayUpdate(fn func()) {
+	c.onRelayUpdate = fn
+}
+
 // Register registers this node with the coordination server.
 func (c *CoordClient) Register(ctx context.Context, handles []string, manifests map[string]*messagepb.ServiceManifest) error {
 	// Build deprecated descriptions from manifests for backward compat with old coord servers
@@ -81,6 +93,7 @@ func (c *CoordClient) Register(ctx context.Context, handles []string, manifests 
 		Handles:            handles,
 		HandleDescriptions: descs,
 		HandleManifests:    manifests,
+		IsRelay:            c.isRelay,
 	})
 	if err != nil {
 		return fmt.Errorf("register node: %w", err)
@@ -126,7 +139,23 @@ func (c *CoordClient) WatchPeerMap(ctx context.Context) error {
 			}
 		}
 		c.resolver.UpdatePeerMap(entries)
-		c.logger.Info("peer map updated", "version", update.Version, "peers", len(update.Peers))
+
+		// Parse relay info
+		var relayInfos []handle.RelayInfo
+		for _, r := range update.Relays {
+			relayInfos = append(relayInfos, handle.RelayInfo{
+				NodeID:    r.NodeId,
+				PublicKey: r.PublicKey,
+				Addr:      r.Addr,
+			})
+		}
+		c.resolver.UpdateRelays(relayInfos)
+
+		if len(relayInfos) > 0 && c.onRelayUpdate != nil {
+			c.onRelayUpdate()
+		}
+
+		c.logger.Info("peer map updated", "version", update.Version, "peers", len(update.Peers), "relays", len(update.Relays))
 	}
 }
 
