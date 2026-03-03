@@ -2,6 +2,8 @@ package coord
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,7 +11,9 @@ import (
 
 	pb "github.com/alexanderfrey/tailbus/api/coordpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	"github.com/alexanderfrey/tailbus/internal/identity"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // Server is the coordination gRPC server.
@@ -24,7 +28,9 @@ type Server struct {
 }
 
 // NewServer creates a new coordination server.
-func NewServer(store *Store, logger *slog.Logger) *Server {
+// If kp is non-nil, mTLS is enabled: the server presents its cert and
+// requires valid client certs with an Ed25519 pubkey in Organization[0].
+func NewServer(store *Store, logger *slog.Logger, kp *identity.Keypair) (*Server, error) {
 	registry := NewRegistry(store, logger)
 	peerMap := NewPeerMap(store, logger)
 
@@ -35,10 +41,31 @@ func NewServer(store *Store, logger *slog.Logger) *Server {
 		logger:   logger,
 	}
 
-	gs := grpc.NewServer()
+	var serverOpts []grpc.ServerOption
+	if kp != nil {
+		cert, err := identity.SelfSignedCert(kp)
+		if err != nil {
+			return nil, fmt.Errorf("generate coord TLS cert: %w", err)
+		}
+		tlsCfg := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			ClientAuth:   tls.RequireAnyClientCert,
+			VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+				if len(rawCerts) == 0 {
+					return nil
+				}
+				// Verify the client cert has a valid pubkey in Organization[0]
+				_, err := identity.PubKeyFromCert(rawCerts[0])
+				return err
+			},
+		}
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
+	}
+
+	gs := grpc.NewServer(serverOpts...)
 	pb.RegisterCoordinationAPIServer(gs, s)
 	s.grpc = gs
-	return s
+	return s, nil
 }
 
 // Serve starts the gRPC server on the given listener.

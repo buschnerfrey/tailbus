@@ -2,6 +2,7 @@ package coord
 
 import (
 	"context"
+	"crypto/tls"
 	"log/slog"
 	"net"
 	"os"
@@ -10,8 +11,9 @@ import (
 	"time"
 
 	pb "github.com/alexanderfrey/tailbus/api/coordpb"
+	"github.com/alexanderfrey/tailbus/internal/identity"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 )
 
 func testStore(t *testing.T) (*Store, func()) {
@@ -34,7 +36,15 @@ func testServer(t *testing.T) (pb.CoordinationAPIClient, func()) {
 		t.Fatal(err)
 	}
 
-	srv := NewServer(store, logger)
+	// Generate coord keypair for mTLS
+	coordKP, err := identity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := NewServer(store, logger, coordKP)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -43,7 +53,24 @@ func testServer(t *testing.T) (pb.CoordinationAPIClient, func()) {
 
 	go srv.Serve(lis)
 
-	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Create a client with TLS + TOFU
+	clientKP, err := identity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientCert, err := identity.SelfSignedCert(clientKP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tofuFile := filepath.Join(dir, "coord.fp")
+	tofu := identity.NewTOFUVerifier(tofuFile)
+
+	clientTLS := &tls.Config{
+		Certificates:          []tls.Certificate{clientCert},
+		InsecureSkipVerify:    true,
+		VerifyPeerCertificate: tofu.Verify,
+	}
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(clientTLS)))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/alexanderfrey/tailbus/internal/config"
 	"github.com/alexanderfrey/tailbus/internal/coord"
+	"github.com/alexanderfrey/tailbus/internal/identity"
 )
 
 func main() {
@@ -52,7 +53,23 @@ func main() {
 	}
 	defer store.Close()
 
-	srv := coord.NewServer(store, logger)
+	// Load or generate coord keypair for mTLS
+	keyFile := cfg.KeyFile
+	if keyFile == "" {
+		keyFile = filepath.Join(cfg.DataDir, "coord.key")
+	}
+	kp, err := identity.LoadOrGenerate(keyFile)
+	if err != nil {
+		logger.Error("failed to load identity", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("coord identity loaded", "key_file", keyFile)
+
+	srv, err := coord.NewServer(store, logger, kp)
+	if err != nil {
+		logger.Error("failed to create server", "error", err)
+		os.Exit(1)
+	}
 
 	// Start stale-node reaper (90s TTL, 30s sweep)
 	ctx, cancel := context.WithCancel(context.Background())

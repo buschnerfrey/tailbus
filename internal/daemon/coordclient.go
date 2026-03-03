@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"time"
@@ -9,7 +10,9 @@ import (
 	pb "github.com/alexanderfrey/tailbus/api/coordpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/handle"
+	"github.com/alexanderfrey/tailbus/internal/identity"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -25,8 +28,27 @@ type CoordClient struct {
 }
 
 // NewCoordClient creates a new coordination client.
-func NewCoordClient(coordAddr, nodeID string, pubKey []byte, advertiseAddr string, resolver *handle.Resolver, logger *slog.Logger) (*CoordClient, error) {
-	conn, err := grpc.NewClient(coordAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+// If kp is non-nil, mTLS is enabled with TOFU verification of the coord cert
+// using the fingerprint file at coordFPFile.
+func NewCoordClient(coordAddr, nodeID string, pubKey []byte, advertiseAddr string, resolver *handle.Resolver, logger *slog.Logger, kp *identity.Keypair, coordFPFile string) (*CoordClient, error) {
+	var dialOpt grpc.DialOption
+	if kp != nil {
+		cert, err := identity.SelfSignedCert(kp)
+		if err != nil {
+			return nil, fmt.Errorf("generate client TLS cert: %w", err)
+		}
+		tofu := identity.NewTOFUVerifier(coordFPFile)
+		clientTLS := &tls.Config{
+			Certificates:          []tls.Certificate{cert},
+			InsecureSkipVerify:    true,
+			VerifyPeerCertificate: tofu.Verify,
+		}
+		dialOpt = grpc.WithTransportCredentials(credentials.NewTLS(clientTLS))
+	} else {
+		dialOpt = grpc.WithTransportCredentials(insecure.NewCredentials())
+	}
+
+	conn, err := grpc.NewClient(coordAddr, dialOpt)
 	if err != nil {
 		return nil, fmt.Errorf("connect to coord server: %w", err)
 	}

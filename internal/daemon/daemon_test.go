@@ -72,7 +72,11 @@ func startTestCoordServer(t *testing.T) (addr string, store *coord.Store, srv *c
 		t.Fatal(err)
 	}
 
-	srv = coord.NewServer(store, logger)
+	// Coord server now needs a keypair (nil for insecure in tests that don't need mTLS)
+	srv, err = coord.NewServer(store, logger, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -95,7 +99,8 @@ func TestHeartbeatReRegistersOnNodeNotFound(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	resolver := handle.NewResolver()
 
-	cc, err := NewCoordClient(addr, "node-1", []byte("pk"), "10.0.0.1:9443", resolver, logger)
+	// Use insecure mode (nil keypair) for daemon tests that don't test mTLS
+	cc, err := NewCoordClient(addr, "node-1", []byte("pk"), "10.0.0.1:9443", resolver, logger, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

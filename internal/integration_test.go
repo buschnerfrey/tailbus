@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"crypto/tls"
 	"log/slog"
 	"net"
 	"os"
@@ -13,12 +14,13 @@ import (
 	coordpb "github.com/alexanderfrey/tailbus/api/coordpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/coord"
+	"github.com/alexanderfrey/tailbus/internal/daemon"
 	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/identity"
 	"github.com/alexanderfrey/tailbus/internal/session"
-	"github.com/alexanderfrey/tailbus/internal/daemon"
 	"github.com/alexanderfrey/tailbus/internal/transport"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -35,7 +37,15 @@ func TestEndToEnd(t *testing.T) {
 	}
 	defer store.Close()
 
-	coordSrv := coord.NewServer(store, logger.With("component", "coord"))
+	// Generate coord keypair for mTLS
+	coordKP, err := identity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordSrv, err := coord.NewServer(store, logger.With("component", "coord"), coordKP)
+	if err != nil {
+		t.Fatal(err)
+	}
 	coordLis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +176,19 @@ func TestEndToEnd(t *testing.T) {
 	// --- Register nodes with coord server ---
 	ctx := context.Background()
 
-	coordConn, _ := grpc.NewClient(coordAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Connect to coord with mTLS (using kp1's cert, TOFU for coord cert)
+	coordClientCert, err := identity.SelfSignedCert(kp1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordTOFUFile := filepath.Join(dir, "coord-test.fp")
+	coordTOFU := identity.NewTOFUVerifier(coordTOFUFile)
+	coordClientTLS := &tls.Config{
+		Certificates:          []tls.Certificate{coordClientCert},
+		InsecureSkipVerify:    true,
+		VerifyPeerCertificate: coordTOFU.Verify,
+	}
+	coordConn, _ := grpc.NewClient(coordAddr, grpc.WithTransportCredentials(credentials.NewTLS(coordClientTLS)))
 	defer coordConn.Close()
 	coordClient := coordpb.NewCoordinationAPIClient(coordConn)
 

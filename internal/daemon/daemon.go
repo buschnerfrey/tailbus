@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net"
+	"os"
+	"path/filepath"
 	"time"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
@@ -107,8 +109,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Wire dashboard dependencies
 	d.agentServer.SetDashboardDeps(d.cfg.NodeID, d.resolver, d.transport)
 
-	// Connect to coord server
-	cc, err := NewCoordClient(d.cfg.CoordAddr, d.cfg.NodeID, d.keypair.Public, d.cfg.AdvertiseAddr, d.resolver, d.logger)
+	// Connect to coord server with mTLS + TOFU
+	coordFPFile := filepath.Join(os.TempDir(), "tailbusd-"+d.cfg.NodeID+".coord-fp")
+	cc, err := NewCoordClient(d.cfg.CoordAddr, d.cfg.NodeID, d.keypair.Public, d.cfg.AdvertiseAddr, d.resolver, d.logger, d.keypair, coordFPFile)
 	if err != nil {
 		return fmt.Errorf("create coord client: %w", err)
 	}

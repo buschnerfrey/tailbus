@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/BurntSushi/toml"
 )
@@ -11,6 +12,7 @@ import (
 type CoordConfig struct {
 	ListenAddr string `toml:"listen_addr"`
 	DataDir    string `toml:"data_dir"`
+	KeyFile    string `toml:"key_file"`
 }
 
 // DaemonConfig is the configuration for a node daemon.
@@ -40,6 +42,9 @@ func LoadCoordConfig(path string) (*CoordConfig, error) {
 	}
 	if cfg.DataDir == "" {
 		cfg.DataDir = "/var/lib/tailbus-coord"
+	}
+	if cfg.KeyFile == "" {
+		cfg.KeyFile = filepath.Join(cfg.DataDir, "coord.key")
 	}
 	return &cfg, nil
 }
