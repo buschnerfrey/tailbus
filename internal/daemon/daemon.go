@@ -43,8 +43,15 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	resolver := handle.NewResolver()
 	sessions := session.NewStore()
 
-	// Create transport
-	tp := transport.NewGRPCTransport(logger)
+	// Generate mTLS certificate from keypair
+	cert, err := identity.SelfSignedCert(kp)
+	if err != nil {
+		return nil, fmt.Errorf("generate TLS cert: %w", err)
+	}
+	verifier := transport.NewResolverVerifier(resolver)
+
+	// Create transport with mTLS
+	tp := transport.NewGRPCTransport(logger, &cert, verifier)
 
 	activity := NewActivityBus()
 	traceStore := NewTraceStore(10000)

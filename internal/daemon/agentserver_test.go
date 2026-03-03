@@ -25,7 +25,7 @@ func startTestAgentServer(t *testing.T) (*AgentServer, string, func()) {
 	activity := NewActivityBus()
 
 	resolver := handle.NewResolver()
-	tp := transport.NewGRPCTransport(logger)
+	tp := transport.NewGRPCTransport(logger, nil, nil)
 
 	srv := NewAgentServer(sessions, nil, activity, logger)
 	srv.SetDashboardDeps("test-node", resolver, tp)

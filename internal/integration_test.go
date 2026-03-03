@@ -53,9 +53,23 @@ func TestEndToEnd(t *testing.T) {
 	resolver1 := handle.NewResolver()
 	resolver2 := handle.NewResolver()
 
-	// --- Create transports ---
-	tp1 := transport.NewGRPCTransport(logger.With("component", "transport-1"))
-	tp2 := transport.NewGRPCTransport(logger.With("component", "transport-2"))
+	// --- Generate TLS certs for mTLS ---
+	cert1, err := identity.SelfSignedCert(kp1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert2, err := identity.SelfSignedCert(kp2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verifiers will be backed by resolvers (set up peer maps below)
+	verifier1 := transport.NewResolverVerifier(resolver1)
+	verifier2 := transport.NewResolverVerifier(resolver2)
+
+	// --- Create transports with mTLS ---
+	tp1 := transport.NewGRPCTransport(logger.With("component", "transport-1"), &cert1, verifier1)
+	tp2 := transport.NewGRPCTransport(logger.With("component", "transport-2"), &cert2, verifier2)
 
 	tp1Lis, _ := net.Listen("tcp", "127.0.0.1:0")
 	tp2Lis, _ := net.Listen("tcp", "127.0.0.1:0")

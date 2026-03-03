@@ -2,6 +2,8 @@ package transport
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net"
@@ -9,7 +11,9 @@ import (
 
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	transportpb "github.com/alexanderfrey/tailbus/api/transportpb"
+	"github.com/alexanderfrey/tailbus/internal/identity"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -21,6 +25,9 @@ type GRPCTransport struct {
 	grpcSrv   *grpc.Server
 	receiveFn func(*messagepb.Envelope)
 	sendFn    func(*messagepb.Envelope)
+
+	tlsCert  *tls.Certificate // nil = insecure
+	verifier PeerVerifier     // nil = no peer verification
 
 	mu    sync.Mutex
 	peers map[string]*peerConn // addr -> peer connection
@@ -34,14 +41,36 @@ type peerConn struct {
 }
 
 // NewGRPCTransport creates a new gRPC-based transport.
-func NewGRPCTransport(logger *slog.Logger) *GRPCTransport {
+// If cert and verifier are provided, mTLS is enabled.
+func NewGRPCTransport(logger *slog.Logger, cert *tls.Certificate, verifier PeerVerifier) *GRPCTransport {
 	t := &GRPCTransport{
-		logger: logger,
-		peers:  make(map[string]*peerConn),
-		ctx:    context.Background(), // default until Start() is called
+		logger:   logger,
+		tlsCert:  cert,
+		verifier: verifier,
+		peers:    make(map[string]*peerConn),
+		ctx:      context.Background(), // default until Start() is called
 	}
 
-	gs := grpc.NewServer()
+	var serverOpts []grpc.ServerOption
+	if cert != nil {
+		serverTLS := &tls.Config{
+			Certificates: []tls.Certificate{*cert},
+			ClientAuth:   tls.RequireAnyClientCert,
+			VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+				if verifier == nil || len(rawCerts) == 0 {
+					return nil
+				}
+				pubKey, err := identity.PubKeyFromCert(rawCerts[0])
+				if err != nil {
+					return fmt.Errorf("extract peer key: %w", err)
+				}
+				return verifier.VerifyPeerKey("", pubKey)
+			},
+		}
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(serverTLS)))
+	}
+
+	gs := grpc.NewServer(serverOpts...)
 	transportpb.RegisterNodeTransportServer(gs, t)
 	t.grpcSrv = gs
 	return t
@@ -135,7 +164,28 @@ func (t *GRPCTransport) getOrConnect(addr string) (*peerConn, error) {
 
 // connectLocked creates a new peer connection. Must be called with t.mu held.
 func (t *GRPCTransport) connectLocked(addr string) (*peerConn, error) {
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	var dialOpt grpc.DialOption
+	if t.tlsCert != nil {
+		clientTLS := &tls.Config{
+			Certificates:       []tls.Certificate{*t.tlsCert},
+			InsecureSkipVerify: true, // self-signed; we verify via VerifyPeerCertificate
+			VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+				if t.verifier == nil || len(rawCerts) == 0 {
+					return nil
+				}
+				pubKey, err := identity.PubKeyFromCert(rawCerts[0])
+				if err != nil {
+					return fmt.Errorf("extract peer key: %w", err)
+				}
+				return t.verifier.VerifyPeerKey(addr, pubKey)
+			},
+		}
+		dialOpt = grpc.WithTransportCredentials(credentials.NewTLS(clientTLS))
+	} else {
+		dialOpt = grpc.WithTransportCredentials(insecure.NewCredentials())
+	}
+
+	conn, err := grpc.NewClient(addr, dialOpt)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}

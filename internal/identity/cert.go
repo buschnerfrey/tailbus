@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -54,4 +55,21 @@ func SelfSignedCert(kp *Keypair) (tls.Certificate, error) {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 
 	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+// PubKeyFromCert extracts the Ed25519 public key from a DER-encoded certificate.
+// The key is stored as a hex string in Organization[0].
+func PubKeyFromCert(certDER []byte) ([]byte, error) {
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return nil, fmt.Errorf("parse certificate: %w", err)
+	}
+	if len(cert.Subject.Organization) == 0 {
+		return nil, fmt.Errorf("certificate has no Organization field")
+	}
+	pubKey, err := hex.DecodeString(cert.Subject.Organization[0])
+	if err != nil {
+		return nil, fmt.Errorf("decode Organization hex: %w", err)
+	}
+	return pubKey, nil
 }

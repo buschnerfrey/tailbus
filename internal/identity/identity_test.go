@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,5 +70,31 @@ func TestSelfSignedCert(t *testing.T) {
 	}
 	if len(cert.Certificate) == 0 {
 		t.Error("empty certificate")
+	}
+}
+
+func TestPubKeyFromCert(t *testing.T) {
+	kp, err := Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := SelfSignedCert(kp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pubKey, err := PubKeyFromCert(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(kp.Public, pubKey) {
+		t.Error("extracted public key does not match original")
+	}
+}
+
+func TestPubKeyFromCertInvalid(t *testing.T) {
+	_, err := PubKeyFromCert([]byte("not a cert"))
+	if err == nil {
+		t.Error("expected error for invalid cert")
 	}
 }
