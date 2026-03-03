@@ -68,10 +68,18 @@ func (s *Session) Resolve() error {
 	return nil
 }
 
-// Store is an in-memory session store.
+// PersistFunc is called when a session is stored or removed.
+type PersistFunc func(sess *Session) error
+
+// RemoveFunc is called when a session is evicted.
+type RemoveFunc func(sessionID string) error
+
+// Store is an in-memory session store with optional persistence callbacks.
 type Store struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session
+	mu        sync.RWMutex
+	sessions  map[string]*Session
+	onPersist PersistFunc
+	onRemove  RemoveFunc
 }
 
 // NewStore creates a new session store.
@@ -79,6 +87,12 @@ func NewStore() *Store {
 	return &Store{
 		sessions: make(map[string]*Session),
 	}
+}
+
+// SetPersistence sets callbacks for durable persistence.
+func (s *Store) SetPersistence(persist PersistFunc, remove RemoveFunc) {
+	s.onPersist = persist
+	s.onRemove = remove
 }
 
 // StartEviction runs a background goroutine that removes resolved sessions
@@ -105,22 +119,34 @@ func (s *Store) StartEviction(ctx context.Context, ttl, interval time.Duration, 
 func (s *Store) evict(ttl time.Duration) int {
 	cutoff := time.Now().Add(-ttl)
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	count := 0
+	var evicted []string
 	for id, sess := range s.sessions {
 		if sess.State == StateResolved && sess.UpdatedAt.Before(cutoff) {
 			delete(s.sessions, id)
-			count++
+			evicted = append(evicted, id)
 		}
 	}
-	return count
+	remove := s.onRemove
+	s.mu.Unlock()
+
+	if remove != nil {
+		for _, id := range evicted {
+			remove(id)
+		}
+	}
+	return len(evicted)
 }
 
-// Put stores a session.
+// Put stores a session and optionally persists it to disk.
 func (s *Store) Put(sess *Session) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.sessions[sess.ID] = sess
+	persist := s.onPersist
+	s.mu.Unlock()
+
+	if persist != nil {
+		persist(sess)
+	}
 }
 
 // Get retrieves a session by ID. Returns a clone safe for concurrent mutation.

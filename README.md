@@ -42,8 +42,11 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **Unix socket token auth** — daemon generates a random auth token file (mode 0600) on startup; CLI and agents present it automatically via gRPC per-RPC credentials; prevents co-tenant handle impersonation
 - **Sequence numbers** — every envelope gets a per-session monotonic sequence number for ordering
 - **Delivery ACKs with retry** — successful delivery generates an ACK back to sender; unacknowledged messages retry with backoff (5s timeout, 3 max retries)
+- **Message persistence** — bbolt-backed store on each daemon; sessions and pending messages survive daemon restarts; ACKed messages purged automatically
+- **MCP gateway** — HTTP server on daemon exposing handles as MCP tools; any MCP-compatible LLM (Claude, ChatGPT, Cursor) can discover and invoke tailbus agents with zero SDK code
 - **Coord admission control** — pre-auth token system (like `tailscale up --authkey`) gates which nodes can join the mesh; open mode (no tokens configured) preserves zero-config default
 - **Health & readiness endpoints** — `/healthz`, `/readyz`, and `/debug/pprof/*` on daemon metrics port (alongside `/metrics`), coord, and relay servers
+- **Docker Compose** — `docker compose up` for a full mesh with coord + 2 daemons + MCP gateway + example agents in 30 seconds
 
 ## Install
 
@@ -84,7 +87,37 @@ make test-all   # Run all tests including integration
 make clean      # Remove binaries and generated code
 ```
 
-## Quick Start
+## Quick Start (Docker Compose)
+
+The fastest way to try tailbus — a full mesh with MCP gateway in 30 seconds:
+
+```bash
+docker compose up --build
+```
+
+This starts: coord server + 2 daemons + MCP gateway (port 8080) + 3 example Python agents (calculator, echo, orchestrator).
+
+Test with curl:
+
+```bash
+# List available agents as MCP tools
+curl -s localhost:8080/mcp \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | jq '.result.tools[].name'
+
+# Call the calculator
+curl -s localhost:8080/mcp \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"calculator.add","arguments":{"a":2,"b":3}}}' | jq
+
+# Call the echo agent (runs on a different node — demonstrates cross-node P2P)
+curl -s localhost:8080/mcp \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello tailbus"}}}' | jq
+
+# Call the orchestrator (delegates to calculator and echo)
+curl -s localhost:8080/mcp \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"orchestrator.compute","arguments":{"operation":"multiply","a":6,"b":7}}}' | jq
+```
+
+## Quick Start (from source)
 
 ### 1. Start the coordination server
 
@@ -269,6 +302,7 @@ listen_addr = ":9443"
 socket_path = "/tmp/tailbusd-1.sock"
 key_file = "/tmp/tailbusd-node1.key"
 metrics_addr = ":9090"
+mcp_addr = ":8080"
 # auth_token = "changeme"
 ```
 
@@ -281,6 +315,7 @@ metrics_addr = ":9090"
 | `socket_path` | `/tmp/tailbusd.sock` | Unix socket for local agent connections |
 | `key_file` | `/tmp/tailbusd-{nodeID}.key` | Node keypair file (auto-generated if missing) |
 | `metrics_addr` | `:9090` | Prometheus + health/pprof HTTP endpoint (empty string disables) |
+| `mcp_addr` | (none) | MCP gateway HTTP listen address (empty string disables) |
 | `auth_token` | (none) | Auth token for coord admission control |
 
 All config fields can be overridden with command-line flags. Run any binary with `-help` to see available flags.
@@ -395,6 +430,37 @@ The interactive dashboard provides a real-time view of the local daemon:
 - `r` — refresh status
 - `c` — clear activity feed
 
+## MCP Gateway
+
+The MCP (Model Context Protocol) gateway lets any MCP-compatible LLM client discover and invoke tailbus agents as tools — no SDK needed.
+
+Enable with `-mcp :8080` on the daemon (or `mcp_addr = ":8080"` in config). The gateway:
+
+- Registers as an internal `_mcp_gateway` handle on the mesh
+- Exposes all handles as MCP tools via `tools/list`
+- Maps each handle's `CommandSpec` to an individual tool (e.g., `calculator.add`, `calculator.multiply`)
+- Handles without commands get a generic tool named after the handle
+- `tools/call` opens a session, sends the payload, waits for the response (30s timeout), and returns the result
+
+**Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/mcp` | JSON-RPC 2.0 requests (`initialize`, `tools/list`, `tools/call`, `ping`) |
+| `GET`  | `/mcp` | SSE stream for server-initiated messages |
+
+**Example: configure as MCP server in Claude Desktop**
+
+```json
+{
+  "mcpServers": {
+    "tailbus": {
+      "url": "http://localhost:8080/mcp"
+    }
+  }
+}
+```
+
 ## Architecture
 
 ```
@@ -417,9 +483,13 @@ internal/
     coordclient.go            Coord server gRPC client (mTLS + TOFU)
     router.go                 Message routing (local vs remote)
     acktracker.go             Delivery ACK tracking and retry
+    msgstore.go               bbolt-backed persistence for sessions and pending messages
     activitybus.go            In-process pub/sub for observability
     tracestore.go             Ring buffer trace span storage
     metrics.go                Prometheus collector + HTTP server (includes health routes)
+
+  mcp/                      MCP gateway
+    gateway.go                HTTP+SSE server exposing handles as MCP tools
 
   health/                   Health, readiness, and pprof endpoints
 
@@ -447,7 +517,7 @@ internal/
 4. `GRPCTransport` attempts direct P2P first. On failure, falls back to relay (stamps `relay_target_key` on the envelope). Failed direct addresses are cached for 60s.
 5. Direct or relay: fires `OnSend` callback (`SENT_TO_TRANSPORT` span)
 6. Remote daemon receives via `OnReceive` callback (`RECEIVED_FROM_TRANSPORT` span), delivers to local subscribers (`DELIVERED_TO_SUBSCRIBER` span)
-7. On successful delivery, an `ACK` envelope is sent back to the sender; the `AckTracker` removes the message from pending. Unacknowledged messages are retried (5s timeout, up to 3 retries)
+7. On successful delivery, an `ACK` envelope is sent back to the sender; the `AckTracker` removes the message from pending (both in-memory and bbolt). Unacknowledged messages are retried (5s timeout, up to 3 retries). On daemon restart, pending messages and sessions are restored from bbolt and retries resume.
 
 ### Protocol
 

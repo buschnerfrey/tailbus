@@ -23,6 +23,7 @@ func main() {
 	keyFile := flag.String("key", "", "path to node key file")
 	metricsAddr := flag.String("metrics", ":9090", "Prometheus metrics listen address (empty to disable)")
 	authToken := flag.String("auth-token", "", "auth token for coord admission control")
+	mcpAddr := flag.String("mcp", "", "MCP gateway listen address (e.g. :8080, empty to disable)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -44,11 +45,15 @@ func main() {
 		cfg.KeyFile = *keyFile
 		cfg.MetricsAddr = *metricsAddr
 		cfg.AuthToken = *authToken
+		cfg.MCPAddr = *mcpAddr
 	}
 
 	// Flag overrides config file
 	if *authToken != "" {
 		cfg.AuthToken = *authToken
+	}
+	if *mcpAddr != "" {
+		cfg.MCPAddr = *mcpAddr
 	}
 
 	if cfg.NodeID == "" {

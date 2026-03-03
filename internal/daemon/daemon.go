@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/alexanderfrey/tailbus/internal/config"
 	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/identity"
+	"github.com/alexanderfrey/tailbus/internal/mcp"
 	"github.com/alexanderfrey/tailbus/internal/session"
 	"github.com/alexanderfrey/tailbus/internal/transport"
 )
@@ -34,6 +36,7 @@ type Daemon struct {
 	traceStore  *TraceStore
 	metrics     *Metrics
 	ackTracker  *AckTracker
+	msgStore    *MessageStore
 }
 
 // New creates a new daemon from config.
@@ -61,6 +64,25 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	traceStore := NewTraceStore(10000)
 	metrics := NewMetrics(activity)
 
+	// Open durable message store
+	dataDir := cfg.DataDir
+	if dataDir == "" {
+		dataDir = filepath.Join(os.TempDir(), "tailbusd-"+cfg.NodeID)
+	}
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return nil, fmt.Errorf("create data dir: %w", err)
+	}
+	msgStore, err := NewMessageStore(filepath.Join(dataDir, "messages.db"), logger)
+	if err != nil {
+		return nil, fmt.Errorf("open message store: %w", err)
+	}
+
+	// Wire session persistence to durable store
+	sessions.SetPersistence(
+		func(sess *session.Session) error { return msgStore.StoreSession(sess) },
+		func(id string) error { return msgStore.RemoveSession(id) },
+	)
+
 	d := &Daemon{
 		cfg:        cfg,
 		logger:     logger,
@@ -71,6 +93,7 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 		activity:   activity,
 		traceStore: traceStore,
 		metrics:    metrics,
+		msgStore:   msgStore,
 	}
 
 	// Agent server needs router, but router needs agent server (for local delivery).
@@ -83,6 +106,7 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 
 	// Create ACK tracker and wire into agent server + router
 	ackTracker := NewAckTracker(tp.Send, logger)
+	ackTracker.SetStore(msgStore)
 	agentSrv.SetAckTracker(ackTracker)
 	router.SetAckTracker(ackTracker)
 
@@ -111,6 +135,26 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 func (d *Daemon) Run(ctx context.Context) error {
 	// Bind transport to daemon context so streams close on shutdown
 	d.transport.Start(ctx)
+
+	// Restore persisted sessions
+	if restored, err := d.msgStore.LoadSessions(); err != nil {
+		d.logger.Warn("failed to load persisted sessions", "error", err)
+	} else if len(restored) > 0 {
+		for _, sess := range restored {
+			d.sessions.Put(sess)
+		}
+		d.logger.Info("restored persisted sessions", "count", len(restored))
+	}
+
+	// Restore pending messages into ACK tracker
+	if pending, err := d.msgStore.LoadPending(); err != nil {
+		d.logger.Warn("failed to load pending messages", "error", err)
+	} else if len(pending) > 0 {
+		for _, pm := range pending {
+			d.ackTracker.Restore(pm)
+		}
+		d.logger.Info("restored pending messages for retry", "count", len(pending))
+	}
 
 	// Start session eviction (5min TTL, 30s sweep)
 	d.sessions.StartEviction(ctx, 5*time.Minute, 30*time.Second, d.logger)
@@ -190,17 +234,39 @@ func (d *Daemon) Run(ctx context.Context) error {
 		go d.metrics.Serve(ctx, d.cfg.MetricsAddr, d.logger)
 	}
 
+	// Start MCP gateway if configured
+	if d.cfg.MCPAddr != "" {
+		gw := mcp.NewGateway(d.agentServer, d.sessions, d.logger)
+		if err := gw.Start(ctx); err != nil {
+			d.logger.Error("failed to start MCP gateway", "error", err)
+		} else {
+			go func() {
+				srv := &http.Server{Addr: d.cfg.MCPAddr, Handler: gw.Handler()}
+				go func() {
+					<-ctx.Done()
+					srv.Close()
+				}()
+				d.logger.Info("MCP gateway listening", "addr", d.cfg.MCPAddr)
+				if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					d.logger.Error("MCP gateway error", "error", err)
+				}
+			}()
+		}
+	}
+
 	d.logger.Info("daemon running",
 		"node_id", d.cfg.NodeID,
 		"p2p_addr", d.cfg.ListenAddr,
 		"socket", d.cfg.SocketPath,
 		"metrics", d.cfg.MetricsAddr,
+		"mcp", d.cfg.MCPAddr,
 	)
 
 	<-ctx.Done()
 	d.logger.Info("daemon shutting down")
 	d.agentServer.GracefulStop()
 	d.transport.Close()
+	d.msgStore.Close()
 	return nil
 }
 
@@ -251,4 +317,14 @@ func (d *Daemon) AgentServer() *AgentServer {
 // TraceStore returns the trace store (used for testing).
 func (d *Daemon) TraceStore() *TraceStore {
 	return d.traceStore
+}
+
+// Resolver returns the handle resolver.
+func (d *Daemon) Resolver() *handle.Resolver {
+	return d.resolver
+}
+
+// Sessions returns the session store.
+func (d *Daemon) Sessions() *session.Store {
+	return d.sessions
 }

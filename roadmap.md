@@ -2,7 +2,7 @@
 
 ## Where we are today
 
-Working MVP with real security and NAT traversal: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens), per-session sequence numbers, and delivery ACKs with retry. **Phase 3 NAT traversal started:** DERP-style relay server enables message delivery across NAT boundaries. **Operability:** health/readiness endpoints and pprof on all binaries. **Phase 4 SDKs started:** Python SDK (async/sync, zero deps) wrapping the stdio bridge.
+Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 10 deployment:** Docker Compose with coord + 2 daemons + MCP gateway + 3 example agents.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
@@ -13,14 +13,18 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 - Unix socket token auth — daemon generates a random token file (mode 0600); CLI and agents present it automatically
 - Coord admission control — pre-auth token system gates node registration; open mode (no tokens) preserves zero-config default
 - Every envelope carries a monotonic sequence number; delivered messages generate ACKs; unacked messages retry (5s timeout, 3 retries)
+- Message persistence — bbolt-backed store on each daemon; sessions and pending messages survive restart; ACKed messages purged automatically
+- MCP gateway — HTTP server on daemon exposing handles as MCP tools; `tools/list` returns handle manifests, `tools/call` opens session + sends + waits for response
+- Docker Compose — `docker compose up` gives you a full mesh with coord + 2 daemons + MCP gateway + 3 example Python agents
 - `/healthz`, `/readyz`, and `/debug/pprof/*` endpoints on daemon metrics port, coord, and relay
 - Python SDK (`sdk/python/`) — `AsyncAgent` and `SyncAgent` with zero external dependencies
 - Service manifests, @-mention routing, tracing, Prometheus metrics, TUI dashboard
 
 **What's missing for real adoption:**
-- No persistence — daemon restart loses all sessions and pending messages
-- Python SDK ships (Phase 1 subprocess bridge); still no TypeScript/native Go SDKs
+- No ACLs — unrestricted any-to-any messaging; need handle-level and tag-based policies
+- Python SDK only; still no TypeScript/native Go SDKs
 - No federation — `name@domain` is parsed but routing is single-coord only
+- No OIDC/SSO identity — nodes authenticate with keypairs, not corporate IdPs
 
 ---
 
@@ -87,13 +91,13 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 - Credit-based flow control on the `Exchange` stream (send permits)
 - Observable metrics: drop count, buffer utilization per handle
 
-### P2.4 — Message persistence (store-and-forward)
-- **Problem:** daemon restart = total amnesia. All sessions, pending outbound messages, and trace spans are lost. The ACK flow is useless if the retry state doesn't survive restarts.
-- Embedded store (bbolt or badger) on each daemon for pending outbound messages
-- Store-and-forward: if remote peer is offline, queue locally, deliver on reconnect
-- Session recovery: reload open sessions from disk on daemon restart
-- Replay unacked messages from persistent log after crash
-- ACKs (P2.2) drive the persistence lifecycle: ACKed = safe to delete from store
+### ~~P2.4 — Message persistence (store-and-forward)~~ ✓ DONE
+- bbolt-backed `MessageStore` on each daemon (`internal/daemon/msgstore.go`)
+- Pending outbound messages persisted until ACKed — survives daemon restart
+- Sessions persisted via `SetPersistence` callbacks on the session store
+- On startup: restores sessions to in-memory store, restores pending messages to ACK tracker for retry
+- Resolved sessions evicted from disk on TTL sweep
+- ACKs drive the persistence lifecycle: `Acknowledge()` removes from both in-memory and bbolt
 
 ### P2.5 — Dead letter queue
 - Messages to unreachable handles after all retries → DLQ (local SQLite or file)
@@ -174,11 +178,14 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 - Auto-generate AgentCards from ServiceManifest data
 - Bridge external A2A agents as synthetic handles in the mesh
 
-### P5.2 — MCP gateway
-- Expose tailbus handles as MCP tools
-- MCP `call_tool` → session open + send + resolve
-- MCP `list_tools` → populated from handle manifests/commands
-- Enables any MCP-compatible LLM to use tailbus agents
+### ~~P5.2 — MCP gateway~~ ✓ DONE
+- HTTP server on daemon (`internal/mcp/gateway.go`) exposing handles as MCP tools
+- JSON-RPC 2.0 over HTTP POST at `/mcp` (MCP streamable HTTP transport)
+- SSE endpoint at `GET /mcp` for server-initiated messages
+- `tools/list` → each handle's commands become individual MCP tools (e.g., `calculator.add`); handles without commands get a generic send tool
+- `tools/call` → opens session to target agent, sends payload, waits for response (30s timeout), returns result
+- Registers as internal `_mcp_gateway` handle for response routing
+- Enable with `-mcp :8080` flag or `mcp_addr` in TOML config
 
 ### P5.3 — HTTP webhook bridge
 - Register webhook URLs as handles: `tailbus webhook register --handle alerts --url https://...`
@@ -311,10 +318,12 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 
 *Must be trivially deployable anywhere.*
 
-### P10.1 — Docker images
-- `tailbus-coord`, `tailbusd`, `tailbus` images
-- Multi-arch (amd64/arm64)
-- `docker-compose.yml` for local dev (coord + 2 daemons)
+### ~~P10.1 — Docker images & compose~~ ✓ DONE
+- Multi-stage `Dockerfile` with `coord`, `daemon`, and `relay` targets
+- `docker-compose.yml`: coord + 2 daemons + MCP gateway (port 8080) + 3 example Python agents
+- Example agents: `calculator` (tool-style with JSON Schema), `echo` (simplest agent), `orchestrator` (multi-agent delegation)
+- `docker compose up --build` → full mesh in 30 seconds
+- Cross-node messaging demonstrated: echo agent on daemon2, others on daemon1
 
 ### P10.2 — Systemd units
 - `tailbus-coord.service`, `tailbusd.service`
@@ -347,7 +356,7 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 
 | Item | Why | Effort |
 |------|-----|--------|
-| **P2.4 — Message persistence** | Daemon restart losing all state is not production-grade. ACKs are useless without durable retry. | Large |
+| ~~**P2.4 — Message persistence**~~ | ✓ Done. bbolt-backed store; sessions and pending messages survive restart. | ~~Large~~ |
 | ~~**P4.1 — Python SDK**~~ | ✓ Done. Async/sync SDK wrapping stdio bridge, zero deps, 46 tests. | ~~Medium~~ |
 | **P2.3 — Backpressure** | Silent message drops are a time bomb. Need explicit signals. | Medium |
 | ~~**P1.5 — Coord admission control**~~ | ✓ Done. Pre-auth token admission on coord. | ~~Small~~ |
@@ -356,11 +365,13 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 
 | Item | Why | Effort |
 |------|-----|--------|
-| **P3.2 — Direct connection probing** | Relay works but is slower; upgrade to direct when possible. | Medium |
-| **P5.1 — A2A gateway** | Interop with the emerging A2A standard. | Medium |
-| **P5.2 — MCP gateway** | Let any MCP-compatible LLM use tailbus agents. | Medium |
+| **P7.1 — Handle-level ACLs** | When >1 team uses the mesh, unrestricted messaging is a non-starter. | Medium |
+| **P6.2 — Error envelope** | Without structured errors, every failure is silent. | Small |
+| ~~**P5.2 — MCP gateway**~~ | ✓ Done. Handles exposed as MCP tools via HTTP+SSE. | ~~Medium~~ |
 | **P4.2 — TypeScript SDK** | Second most common agent language. | Medium |
 | **P9.1 — OpenTelemetry** | Custom tracing works at small scale; OTel needed for production debugging. | Medium |
+| **P5.1 — A2A gateway** | Interop with the emerging A2A standard. | Medium |
+| **P3.2 — Direct connection probing** | Relay works but is slower; upgrade to direct when possible. | Medium |
 
 ### Later — Enterprise & Scale
 
@@ -369,8 +380,10 @@ Working MVP with real security and NAT traversal: coord server + node daemons + 
 | **P7.1-P7.2 — ACLs** | Required for multi-team deployments. | Large |
 | **P8.1 — Domain isolation** | Required for multi-tenant SaaS. | Large |
 | **P6.1-P6.3 — Rich semantics** | Multi-party sessions, delegation, error envelopes. | Large |
+| **OIDC/SSO Identity** | Enterprise adoption requires "use your existing IdP." | Large |
 | **P8.2 — Federation** | Massive scope; get single-domain right first. | Very large |
-| **P10.1-P10.4 — Deployment** | Docker, systemd, K8s. Important but not differentiating. | Medium |
+| ~~**P10.1 — Docker compose**~~ | ✓ Done. Multi-stage Dockerfile + compose with 3 example agents. | ~~Small~~ |
+| **P10.2-P10.4 — Systemd, K8s, Helm** | Important but not differentiating. | Medium |
 
 ---
 

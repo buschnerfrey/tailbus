@@ -29,6 +29,7 @@ type AckTracker struct {
 	logger  *slog.Logger
 	timeout time.Duration
 	maxRetries int
+	store   *MessageStore // optional durable backing
 }
 
 // NewAckTracker creates a new ACK tracker.
@@ -42,24 +43,50 @@ func NewAckTracker(sendFn func(addr string, env *messagepb.Envelope) error, logg
 	}
 }
 
+// SetStore attaches a durable message store for persistence.
+func (a *AckTracker) SetStore(store *MessageStore) {
+	a.store = store
+}
+
+// Restore adds a pending message loaded from durable storage (no re-persist).
+func (a *AckTracker) Restore(pm *pendingMessage) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pending[pm.env.MessageId] = pm
+}
+
 // Track registers a sent envelope as pending ACK.
 func (a *AckTracker) Track(env *messagepb.Envelope, peerAddr string) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.pending[env.MessageId] = &pendingMessage{
 		env:      env,
 		peerAddr: peerAddr,
 		sentAt:   time.Now(),
+	}
+	store := a.store
+	a.mu.Unlock()
+
+	if store != nil {
+		if err := store.StorePending(env, peerAddr); err != nil {
+			a.logger.Warn("failed to persist pending message", "message_id", env.MessageId, "error", err)
+		}
 	}
 }
 
 // Acknowledge removes a message from pending. Returns true if it was pending.
 func (a *AckTracker) Acknowledge(messageID string) bool {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	_, ok := a.pending[messageID]
 	if ok {
 		delete(a.pending, messageID)
+	}
+	store := a.store
+	a.mu.Unlock()
+
+	if ok && store != nil {
+		if err := store.RemovePending(messageID); err != nil {
+			a.logger.Warn("failed to remove pending message from store", "message_id", messageID, "error", err)
+		}
 	}
 	return ok
 }

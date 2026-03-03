@@ -1,0 +1,147 @@
+# Tailbus Docker Compose — Full mesh with MCP gateway
+#
+# Usage:
+#   docker compose up --build
+#
+# This gives you:
+#   - Coordination server (discovery + peer map)
+#   - Two daemon nodes with P2P connectivity
+#   - MCP gateway on daemon1 (port 8080)
+#   - Three example Python agents (calculator, echo, orchestrator)
+#
+# Test with curl:
+#   # Initialize MCP session
+#   curl -s localhost:8080/mcp -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | jq
+#
+#   # List available tools (agents)
+#   curl -s localhost:8080/mcp -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | jq
+#
+#   # Call the echo agent
+#   curl -s localhost:8080/mcp -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello world"}}}' | jq
+#
+#   # Call the calculator
+#   curl -s localhost:8080/mcp -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"calculator.add","arguments":{"a":2,"b":3}}}' | jq
+
+services:
+  # --- Coordination server ---
+  coord:
+    build:
+      context: .
+      target: coord
+    ports:
+      - "8443:8443"
+    volumes:
+      - coord-data:/data
+    command: ["-data-dir", "/data", "-listen", ":8443", "-health-addr", ":8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # --- Daemon 1 (with MCP gateway + calculator + orchestrator agents) ---
+  daemon1:
+    build:
+      context: .
+      target: daemon
+    ports:
+      - "8080:8080"    # MCP gateway
+      - "9090:9090"    # Prometheus metrics
+    volumes:
+      - daemon1-data:/data
+      - daemon1-sock:/var/run/tailbus
+      - ./sdk:/sdk:ro
+      - ./examples/docker:/agents:ro
+    depends_on:
+      coord:
+        condition: service_healthy
+    command: >
+      tailbusd
+        -node-id daemon1
+        -coord coord:8443
+        -advertise daemon1:9443
+        -listen :9443
+        -socket /var/run/tailbus/tailbusd.sock
+        -metrics :9090
+        -mcp :8080
+    environment:
+      - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
+
+  # Calculator agent on daemon1
+  calculator:
+    build:
+      context: .
+      target: daemon
+    volumes:
+      - daemon1-sock:/var/run/tailbus:ro
+      - ./sdk:/sdk:ro
+      - ./examples/docker:/agents:ro
+    depends_on:
+      - daemon1
+    entrypoint: ["python3", "/agents/calculator_agent.py"]
+    environment:
+      - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
+    restart: on-failure
+
+  # Orchestrator agent on daemon1
+  orchestrator:
+    build:
+      context: .
+      target: daemon
+    volumes:
+      - daemon1-sock:/var/run/tailbus:ro
+      - ./sdk:/sdk:ro
+      - ./examples/docker:/agents:ro
+    depends_on:
+      - daemon1
+    entrypoint: ["python3", "/agents/orchestrator_agent.py"]
+    environment:
+      - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
+    restart: on-failure
+
+  # --- Daemon 2 (with echo agent) ---
+  daemon2:
+    build:
+      context: .
+      target: daemon
+    volumes:
+      - daemon2-data:/data
+      - daemon2-sock:/var/run/tailbus
+      - ./sdk:/sdk:ro
+      - ./examples/docker:/agents:ro
+    depends_on:
+      coord:
+        condition: service_healthy
+    command: >
+      tailbusd
+        -node-id daemon2
+        -coord coord:8443
+        -advertise daemon2:9443
+        -listen :9443
+        -socket /var/run/tailbus/tailbusd.sock
+        -metrics ""
+    environment:
+      - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
+
+  # Echo agent on daemon2 (demonstrates cross-node messaging)
+  echo:
+    build:
+      context: .
+      target: daemon
+    volumes:
+      - daemon2-sock:/var/run/tailbus:ro
+      - ./sdk:/sdk:ro
+      - ./examples/docker:/agents:ro
+    depends_on:
+      - daemon2
+    entrypoint: ["python3", "/agents/echo_agent.py"]
+    environment:
+      - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
+    restart: on-failure
+
+volumes:
+  coord-data:
+  daemon1-data:
+  daemon1-sock:
+  daemon2-data:
+  daemon2-sock:

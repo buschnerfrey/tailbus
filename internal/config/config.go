@@ -27,6 +27,7 @@ type DaemonConfig struct {
 	DataDir       string `toml:"data_dir"`
 	MetricsAddr   string `toml:"metrics_addr"`
 	AuthToken     string `toml:"auth_token"`
+	MCPAddr       string `toml:"mcp_addr"`
 }
 
 // RelayConfig is the configuration for a relay server.
