@@ -31,7 +31,7 @@ const (
 // OAuthConfig holds configuration for the OAuth device flow server.
 type OAuthConfig struct {
 	Providers []OAuthProviderConfig
-	ExternalURL string // e.g. "https://coord.tailbus.dev" — base URL for callbacks
+	ExternalURL string // e.g. "https://coord.tailbus.co" — base URL for callbacks
 }
 
 // OAuthProviderConfig holds OIDC provider configuration.

@@ -16,7 +16,7 @@ import (
 func main() {
 	configPath := flag.String("config", "", "path to config file")
 	nodeID := flag.String("node-id", "", "node ID")
-	coordAddr := flag.String("coord", "coord.tailbus.dev:8443", "coordination server address")
+	coordAddr := flag.String("coord", "coord.tailbus.co:8443", "coordination server address")
 	advAddr := flag.String("advertise", "", "advertise address for P2P")
 	listenAddr := flag.String("listen", ":9443", "P2P listen address")
 	socketPath := flag.String("socket", "/tmp/tailbusd.sock", "Unix socket path")

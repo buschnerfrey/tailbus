@@ -63,7 +63,7 @@ func main() {
 	switch args[0] {
 	case "login":
 		loginFlags := flag.NewFlagSet("login", flag.ExitOnError)
-		coordAddr := loginFlags.String("coord", "coord.tailbus.dev:8443", "coordination server address")
+		coordAddr := loginFlags.String("coord", "coord.tailbus.co:8443", "coordination server address")
 		credsFile := loginFlags.String("credentials", "", "path to credentials file")
 		loginFlags.Parse(args[1:])
 

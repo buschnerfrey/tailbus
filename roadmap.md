@@ -73,7 +73,7 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - CLI commands: `tailbus login` (device flow), `tailbus logout` (remove creds), `tailbus status` (show identity + connection)
 - Admission controller accepts both JWTs (tokens starting with `eyJ`) and pre-shared tokens — fully backward compatible
 - SQLite `users` and `node_users` tables track user↔node bindings
-- Default coord address changed to `coord.tailbus.dev:8443` for zero-config UX
+- Default coord address changed to `coord.tailbus.co:8443` for zero-config UX
 - Pre-shared `auth_token` in config/flags skips OAuth entirely (CI, automation)
 
 ### P1.7 — Handle namespace policies

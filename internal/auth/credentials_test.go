@@ -14,7 +14,7 @@ func TestCredentialsSaveLoad(t *testing.T) {
 		AccessToken:  "at_test",
 		RefreshToken: "rt_test",
 		Email:        "alice@example.com",
-		CoordAddr:    "coord.tailbus.dev:8443",
+		CoordAddr:    "coord.tailbus.co:8443",
 		ExpiresAt:    time.Now().Add(1 * time.Hour).Unix(),
 	}
 
@@ -33,8 +33,8 @@ func TestCredentialsSaveLoad(t *testing.T) {
 	if loaded.AccessToken != "at_test" {
 		t.Fatalf("got access_token %q, want at_test", loaded.AccessToken)
 	}
-	if loaded.CoordAddr != "coord.tailbus.dev:8443" {
-		t.Fatalf("got coord_addr %q, want coord.tailbus.dev:8443", loaded.CoordAddr)
+	if loaded.CoordAddr != "coord.tailbus.co:8443" {
+		t.Fatalf("got coord_addr %q, want coord.tailbus.co:8443", loaded.CoordAddr)
 	}
 }
 

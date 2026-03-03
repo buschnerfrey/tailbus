@@ -348,7 +348,7 @@ key_file = "/tmp/tailbus-relay.key"
 
 ```toml
 node_id = "node-1"
-coord_addr = "coord.tailbus.dev:8443"
+coord_addr = "coord.tailbus.co:8443"
 advertise_addr = "127.0.0.1:9443"
 listen_addr = ":9443"
 socket_path = "/tmp/tailbusd-1.sock"
@@ -362,7 +362,7 @@ mcp_addr = ":8080"
 | Field | Default | Description |
 |-------|---------|-------------|
 | `node_id` | hostname | Unique identifier for this node |
-| `coord_addr` | `coord.tailbus.dev:8443` | Coordination server address |
+| `coord_addr` | `coord.tailbus.co:8443` | Coordination server address |
 | `advertise_addr` | (required) | Address other daemons use to reach this node |
 | `listen_addr` | `:9443` | P2P gRPC listen address |
 | `socket_path` | `/tmp/tailbusd.sock` | Unix socket for local agent connections |
