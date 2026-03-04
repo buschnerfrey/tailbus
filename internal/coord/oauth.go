@@ -158,6 +158,12 @@ func (s *OAuthServer) StartCleanup(ctx context.Context) {
 // Handler returns an http.Handler with all OAuth routes.
 func (s *OAuthServer) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.RegisterRoutes(mux)
+	return mux
+}
+
+// RegisterRoutes adds OAuth routes to an existing mux.
+func (s *OAuthServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /oauth/device/code", s.handleDeviceCode)
 	mux.HandleFunc("POST /oauth/device/token", s.handleDeviceToken)
 	mux.HandleFunc("GET /oauth/verify", s.handleVerifyPage)
@@ -166,7 +172,6 @@ func (s *OAuthServer) Handler() http.Handler {
 	mux.HandleFunc("POST /oauth/refresh", s.handleRefresh)
 	mux.HandleFunc("GET /oauth/login", s.handleBrowserLogin)
 	mux.HandleFunc("GET /oauth/callback/web", s.handleBrowserCallback)
-	return mux
 }
 
 // handleDeviceCode implements POST /oauth/device/code — starts the device flow.

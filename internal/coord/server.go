@@ -112,10 +112,10 @@ func (s *Server) HTTPHandler() http.Handler {
 
 	mux := http.NewServeMux()
 	if s.oauth != nil {
-		mux.Handle("/oauth/", s.oauth.Handler())
+		s.oauth.RegisterRoutes(mux)
 	}
 	if s.rest != nil {
-		mux.Handle("/api/", s.rest.Handler())
+		s.rest.RegisterRoutes(mux)
 	}
 
 	if s.corsOrigin != "" {

@@ -24,6 +24,12 @@ func NewRESTHandler(store *Store, jwtIssuer *JWTIssuer, logger *slog.Logger) *RE
 // Handler returns an http.Handler with all REST routes.
 func (h *RESTHandler) Handler() http.Handler {
 	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+	return mux
+}
+
+// RegisterRoutes adds REST API routes to an existing mux.
+func (h *RESTHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/me", h.handleMe)
 	mux.HandleFunc("GET /api/v1/teams", h.handleListTeams)
 	mux.HandleFunc("POST /api/v1/teams", h.handleCreateTeam)
@@ -34,7 +40,6 @@ func (h *RESTHandler) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/teams/{teamId}/invites", h.handleCreateInvite)
 	mux.HandleFunc("GET /api/v1/teams/{teamId}/nodes", h.handleGetNodes)
 	mux.HandleFunc("POST /api/v1/invites/accept", h.handleAcceptInvite)
-	return mux
 }
 
 // authenticate extracts and validates the Bearer JWT from the request.
