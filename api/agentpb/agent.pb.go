@@ -2084,6 +2084,78 @@ func (x *GetTraceResponse) GetSpans() []*TraceSpan {
 	return nil
 }
 
+type ShutdownRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownRequest) Reset() {
+	*x = ShutdownRequest{}
+	mi := &file_tailbus_v1_agent_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownRequest) ProtoMessage() {}
+
+func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_agent_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
+func (*ShutdownRequest) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{33}
+}
+
+type ShutdownResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShutdownResponse) Reset() {
+	*x = ShutdownResponse{}
+	mi := &file_tailbus_v1_agent_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShutdownResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShutdownResponse) ProtoMessage() {}
+
+func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_agent_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShutdownResponse.ProtoReflect.Descriptor instead.
+func (*ShutdownResponse) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{34}
+}
+
 var File_tailbus_v1_agent_proto protoreflect.FileDescriptor
 
 const file_tailbus_v1_agent_proto_rawDesc = "" +
@@ -2245,7 +2317,9 @@ const file_tailbus_v1_agent_proto_rawDesc = "" +
 	"\x0fGetTraceRequest\x12\x19\n" +
 	"\btrace_id\x18\x01 \x01(\tR\atraceId\"?\n" +
 	"\x10GetTraceResponse\x12+\n" +
-	"\x05spans\x18\x01 \x03(\v2\x15.tailbus.v1.TraceSpanR\x05spans*\x84\x02\n" +
+	"\x05spans\x18\x01 \x03(\v2\x15.tailbus.v1.TraceSpanR\x05spans\"\x11\n" +
+	"\x0fShutdownRequest\"\x12\n" +
+	"\x10ShutdownResponse*\x84\x02\n" +
 	"\vTraceAction\x12\x1c\n" +
 	"\x18TRACE_ACTION_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cTRACE_ACTION_MESSAGE_CREATED\x10\x01\x12\x1d\n" +
@@ -2253,7 +2327,7 @@ const file_tailbus_v1_agent_proto_rawDesc = "" +
 	"\x1aTRACE_ACTION_ROUTED_REMOTE\x10\x03\x12\"\n" +
 	"\x1eTRACE_ACTION_SENT_TO_TRANSPORT\x10\x04\x12(\n" +
 	"$TRACE_ACTION_RECEIVED_FROM_TRANSPORT\x10\x05\x12(\n" +
-	"$TRACE_ACTION_DELIVERED_TO_SUBSCRIBER\x10\x062\x83\a\n" +
+	"$TRACE_ACTION_DELIVERED_TO_SUBSCRIBER\x10\x062\xca\a\n" +
 	"\bAgentAPI\x12E\n" +
 	"\bRegister\x12\x1b.tailbus.v1.RegisterRequest\x1a\x1c.tailbus.v1.RegisterResponse\x12]\n" +
 	"\x10IntrospectHandle\x12#.tailbus.v1.IntrospectHandleRequest\x1a$.tailbus.v1.IntrospectHandleResponse\x12N\n" +
@@ -2265,7 +2339,8 @@ const file_tailbus_v1_agent_proto_rawDesc = "" +
 	"\fListSessions\x12\x1f.tailbus.v1.ListSessionsRequest\x1a .tailbus.v1.ListSessionsResponse\x12T\n" +
 	"\rGetNodeStatus\x12 .tailbus.v1.GetNodeStatusRequest\x1a!.tailbus.v1.GetNodeStatusResponse\x12N\n" +
 	"\rWatchActivity\x12 .tailbus.v1.WatchActivityRequest\x1a\x19.tailbus.v1.ActivityEvent0\x01\x12E\n" +
-	"\bGetTrace\x12\x1b.tailbus.v1.GetTraceRequest\x1a\x1c.tailbus.v1.GetTraceResponseB.Z,github.com/alexanderfrey/tailbus/api/agentpbb\x06proto3"
+	"\bGetTrace\x12\x1b.tailbus.v1.GetTraceRequest\x1a\x1c.tailbus.v1.GetTraceResponse\x12E\n" +
+	"\bShutdown\x12\x1b.tailbus.v1.ShutdownRequest\x1a\x1c.tailbus.v1.ShutdownResponseB.Z,github.com/alexanderfrey/tailbus/api/agentpbb\x06proto3"
 
 var (
 	file_tailbus_v1_agent_proto_rawDescOnce sync.Once
@@ -2280,7 +2355,7 @@ func file_tailbus_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_tailbus_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_tailbus_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_tailbus_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_tailbus_v1_agent_proto_goTypes = []any{
 	(TraceAction)(0),                  // 0: tailbus.v1.TraceAction
 	(*RegisterRequest)(nil),           // 1: tailbus.v1.RegisterRequest
@@ -2316,33 +2391,35 @@ var file_tailbus_v1_agent_proto_goTypes = []any{
 	(*TraceSpan)(nil),                 // 31: tailbus.v1.TraceSpan
 	(*GetTraceRequest)(nil),           // 32: tailbus.v1.GetTraceRequest
 	(*GetTraceResponse)(nil),          // 33: tailbus.v1.GetTraceResponse
-	nil,                               // 34: tailbus.v1.TraceSpan.MetadataEntry
-	(*messagepb.ServiceManifest)(nil), // 35: tailbus.v1.ServiceManifest
-	(*messagepb.Envelope)(nil),        // 36: tailbus.v1.Envelope
-	(*timestamppb.Timestamp)(nil),     // 37: google.protobuf.Timestamp
+	(*ShutdownRequest)(nil),           // 34: tailbus.v1.ShutdownRequest
+	(*ShutdownResponse)(nil),          // 35: tailbus.v1.ShutdownResponse
+	nil,                               // 36: tailbus.v1.TraceSpan.MetadataEntry
+	(*messagepb.ServiceManifest)(nil), // 37: tailbus.v1.ServiceManifest
+	(*messagepb.Envelope)(nil),        // 38: tailbus.v1.Envelope
+	(*timestamppb.Timestamp)(nil),     // 39: google.protobuf.Timestamp
 }
 var file_tailbus_v1_agent_proto_depIdxs = []int32{
-	35, // 0: tailbus.v1.RegisterRequest.manifest:type_name -> tailbus.v1.ServiceManifest
-	35, // 1: tailbus.v1.IntrospectHandleResponse.manifest:type_name -> tailbus.v1.ServiceManifest
+	37, // 0: tailbus.v1.RegisterRequest.manifest:type_name -> tailbus.v1.ServiceManifest
+	37, // 1: tailbus.v1.IntrospectHandleResponse.manifest:type_name -> tailbus.v1.ServiceManifest
 	7,  // 2: tailbus.v1.ListHandlesResponse.entries:type_name -> tailbus.v1.HandleEntry
-	35, // 3: tailbus.v1.HandleEntry.manifest:type_name -> tailbus.v1.ServiceManifest
-	36, // 4: tailbus.v1.IncomingMessage.envelope:type_name -> tailbus.v1.Envelope
+	37, // 3: tailbus.v1.HandleEntry.manifest:type_name -> tailbus.v1.ServiceManifest
+	38, // 4: tailbus.v1.IncomingMessage.envelope:type_name -> tailbus.v1.Envelope
 	18, // 5: tailbus.v1.ListSessionsResponse.sessions:type_name -> tailbus.v1.SessionInfo
-	37, // 6: tailbus.v1.GetNodeStatusResponse.started_at:type_name -> google.protobuf.Timestamp
+	39, // 6: tailbus.v1.GetNodeStatusResponse.started_at:type_name -> google.protobuf.Timestamp
 	22, // 7: tailbus.v1.GetNodeStatusResponse.handles:type_name -> tailbus.v1.HandleInfo
 	23, // 8: tailbus.v1.GetNodeStatusResponse.peers:type_name -> tailbus.v1.PeerStatus
 	18, // 9: tailbus.v1.GetNodeStatusResponse.sessions:type_name -> tailbus.v1.SessionInfo
 	24, // 10: tailbus.v1.GetNodeStatusResponse.counters:type_name -> tailbus.v1.Counters
 	21, // 11: tailbus.v1.GetNodeStatusResponse.relays:type_name -> tailbus.v1.RelayStatus
-	35, // 12: tailbus.v1.HandleInfo.manifest:type_name -> tailbus.v1.ServiceManifest
-	37, // 13: tailbus.v1.ActivityEvent.timestamp:type_name -> google.protobuf.Timestamp
+	37, // 12: tailbus.v1.HandleInfo.manifest:type_name -> tailbus.v1.ServiceManifest
+	39, // 13: tailbus.v1.ActivityEvent.timestamp:type_name -> google.protobuf.Timestamp
 	27, // 14: tailbus.v1.ActivityEvent.message_routed:type_name -> tailbus.v1.MessageRoutedEvent
 	28, // 15: tailbus.v1.ActivityEvent.session_opened:type_name -> tailbus.v1.SessionOpenedEvent
 	29, // 16: tailbus.v1.ActivityEvent.session_resolved:type_name -> tailbus.v1.SessionResolvedEvent
 	30, // 17: tailbus.v1.ActivityEvent.handle_registered:type_name -> tailbus.v1.HandleRegisteredEvent
 	0,  // 18: tailbus.v1.TraceSpan.action:type_name -> tailbus.v1.TraceAction
-	37, // 19: tailbus.v1.TraceSpan.timestamp:type_name -> google.protobuf.Timestamp
-	34, // 20: tailbus.v1.TraceSpan.metadata:type_name -> tailbus.v1.TraceSpan.MetadataEntry
+	39, // 19: tailbus.v1.TraceSpan.timestamp:type_name -> google.protobuf.Timestamp
+	36, // 20: tailbus.v1.TraceSpan.metadata:type_name -> tailbus.v1.TraceSpan.MetadataEntry
 	31, // 21: tailbus.v1.GetTraceResponse.spans:type_name -> tailbus.v1.TraceSpan
 	1,  // 22: tailbus.v1.AgentAPI.Register:input_type -> tailbus.v1.RegisterRequest
 	3,  // 23: tailbus.v1.AgentAPI.IntrospectHandle:input_type -> tailbus.v1.IntrospectHandleRequest
@@ -2355,19 +2432,21 @@ var file_tailbus_v1_agent_proto_depIdxs = []int32{
 	19, // 30: tailbus.v1.AgentAPI.GetNodeStatus:input_type -> tailbus.v1.GetNodeStatusRequest
 	25, // 31: tailbus.v1.AgentAPI.WatchActivity:input_type -> tailbus.v1.WatchActivityRequest
 	32, // 32: tailbus.v1.AgentAPI.GetTrace:input_type -> tailbus.v1.GetTraceRequest
-	2,  // 33: tailbus.v1.AgentAPI.Register:output_type -> tailbus.v1.RegisterResponse
-	4,  // 34: tailbus.v1.AgentAPI.IntrospectHandle:output_type -> tailbus.v1.IntrospectHandleResponse
-	6,  // 35: tailbus.v1.AgentAPI.ListHandles:output_type -> tailbus.v1.ListHandlesResponse
-	9,  // 36: tailbus.v1.AgentAPI.OpenSession:output_type -> tailbus.v1.OpenSessionResponse
-	11, // 37: tailbus.v1.AgentAPI.SendMessage:output_type -> tailbus.v1.SendMessageResponse
-	13, // 38: tailbus.v1.AgentAPI.Subscribe:output_type -> tailbus.v1.IncomingMessage
-	15, // 39: tailbus.v1.AgentAPI.ResolveSession:output_type -> tailbus.v1.ResolveSessionResponse
-	17, // 40: tailbus.v1.AgentAPI.ListSessions:output_type -> tailbus.v1.ListSessionsResponse
-	20, // 41: tailbus.v1.AgentAPI.GetNodeStatus:output_type -> tailbus.v1.GetNodeStatusResponse
-	26, // 42: tailbus.v1.AgentAPI.WatchActivity:output_type -> tailbus.v1.ActivityEvent
-	33, // 43: tailbus.v1.AgentAPI.GetTrace:output_type -> tailbus.v1.GetTraceResponse
-	33, // [33:44] is the sub-list for method output_type
-	22, // [22:33] is the sub-list for method input_type
+	34, // 33: tailbus.v1.AgentAPI.Shutdown:input_type -> tailbus.v1.ShutdownRequest
+	2,  // 34: tailbus.v1.AgentAPI.Register:output_type -> tailbus.v1.RegisterResponse
+	4,  // 35: tailbus.v1.AgentAPI.IntrospectHandle:output_type -> tailbus.v1.IntrospectHandleResponse
+	6,  // 36: tailbus.v1.AgentAPI.ListHandles:output_type -> tailbus.v1.ListHandlesResponse
+	9,  // 37: tailbus.v1.AgentAPI.OpenSession:output_type -> tailbus.v1.OpenSessionResponse
+	11, // 38: tailbus.v1.AgentAPI.SendMessage:output_type -> tailbus.v1.SendMessageResponse
+	13, // 39: tailbus.v1.AgentAPI.Subscribe:output_type -> tailbus.v1.IncomingMessage
+	15, // 40: tailbus.v1.AgentAPI.ResolveSession:output_type -> tailbus.v1.ResolveSessionResponse
+	17, // 41: tailbus.v1.AgentAPI.ListSessions:output_type -> tailbus.v1.ListSessionsResponse
+	20, // 42: tailbus.v1.AgentAPI.GetNodeStatus:output_type -> tailbus.v1.GetNodeStatusResponse
+	26, // 43: tailbus.v1.AgentAPI.WatchActivity:output_type -> tailbus.v1.ActivityEvent
+	33, // 44: tailbus.v1.AgentAPI.GetTrace:output_type -> tailbus.v1.GetTraceResponse
+	35, // 45: tailbus.v1.AgentAPI.Shutdown:output_type -> tailbus.v1.ShutdownResponse
+	34, // [34:46] is the sub-list for method output_type
+	22, // [22:34] is the sub-list for method input_type
 	22, // [22:22] is the sub-list for extension type_name
 	22, // [22:22] is the sub-list for extension extendee
 	0,  // [0:22] is the sub-list for field type_name
@@ -2390,7 +2469,7 @@ func file_tailbus_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tailbus_v1_agent_proto_rawDesc), len(file_tailbus_v1_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   34,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

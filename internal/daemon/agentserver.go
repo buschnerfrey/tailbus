@@ -98,6 +98,9 @@ type AgentServer struct {
 	// ACK tracking
 	ackTracker *AckTracker
 
+	// Shutdown callback (set via SetShutdownFunc)
+	shutdownFn func()
+
 	// Dashboard dependencies (set via SetDashboardDeps)
 	dashResolver  *handle.Resolver
 	dashTransport *transport.GRPCTransport
@@ -170,6 +173,20 @@ func (s *AgentServer) authStreamInterceptor(srv any, ss grpc.ServerStream, _ *gr
 		return err
 	}
 	return handler(srv, ss)
+}
+
+// SetShutdownFunc sets the function called when a Shutdown RPC is received.
+func (s *AgentServer) SetShutdownFunc(fn func()) {
+	s.shutdownFn = fn
+}
+
+// Shutdown gracefully shuts down the daemon.
+func (s *AgentServer) Shutdown(_ context.Context, _ *agentpb.ShutdownRequest) (*agentpb.ShutdownResponse, error) {
+	s.logger.Info("shutdown requested via RPC")
+	if s.shutdownFn != nil {
+		go s.shutdownFn()
+	}
+	return &agentpb.ShutdownResponse{}, nil
 }
 
 // SetDashboardDeps sets dependencies needed for dashboard RPCs.

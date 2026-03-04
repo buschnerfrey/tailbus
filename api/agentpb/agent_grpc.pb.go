@@ -30,6 +30,7 @@ const (
 	AgentAPI_GetNodeStatus_FullMethodName    = "/tailbus.v1.AgentAPI/GetNodeStatus"
 	AgentAPI_WatchActivity_FullMethodName    = "/tailbus.v1.AgentAPI/WatchActivity"
 	AgentAPI_GetTrace_FullMethodName         = "/tailbus.v1.AgentAPI/GetTrace"
+	AgentAPI_Shutdown_FullMethodName         = "/tailbus.v1.AgentAPI/Shutdown"
 )
 
 // AgentAPIClient is the client API for AgentAPI service.
@@ -47,6 +48,7 @@ type AgentAPIClient interface {
 	GetNodeStatus(ctx context.Context, in *GetNodeStatusRequest, opts ...grpc.CallOption) (*GetNodeStatusResponse, error)
 	WatchActivity(ctx context.Context, in *WatchActivityRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ActivityEvent], error)
 	GetTrace(ctx context.Context, in *GetTraceRequest, opts ...grpc.CallOption) (*GetTraceResponse, error)
+	Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error)
 }
 
 type agentAPIClient struct {
@@ -185,6 +187,16 @@ func (c *agentAPIClient) GetTrace(ctx context.Context, in *GetTraceRequest, opts
 	return out, nil
 }
 
+func (c *agentAPIClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ShutdownResponse)
+	err := c.cc.Invoke(ctx, AgentAPI_Shutdown_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentAPIServer is the server API for AgentAPI service.
 // All implementations must embed UnimplementedAgentAPIServer
 // for forward compatibility.
@@ -200,6 +212,7 @@ type AgentAPIServer interface {
 	GetNodeStatus(context.Context, *GetNodeStatusRequest) (*GetNodeStatusResponse, error)
 	WatchActivity(*WatchActivityRequest, grpc.ServerStreamingServer[ActivityEvent]) error
 	GetTrace(context.Context, *GetTraceRequest) (*GetTraceResponse, error)
+	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
 	mustEmbedUnimplementedAgentAPIServer()
 }
 
@@ -242,6 +255,9 @@ func (UnimplementedAgentAPIServer) WatchActivity(*WatchActivityRequest, grpc.Ser
 }
 func (UnimplementedAgentAPIServer) GetTrace(context.Context, *GetTraceRequest) (*GetTraceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTrace not implemented")
+}
+func (UnimplementedAgentAPIServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Shutdown not implemented")
 }
 func (UnimplementedAgentAPIServer) mustEmbedUnimplementedAgentAPIServer() {}
 func (UnimplementedAgentAPIServer) testEmbeddedByValue()                  {}
@@ -448,6 +464,24 @@ func _AgentAPI_GetTrace_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentAPI_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShutdownRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentAPIServer).Shutdown(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentAPI_Shutdown_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentAPIServer).Shutdown(ctx, req.(*ShutdownRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentAPI_ServiceDesc is the grpc.ServiceDesc for AgentAPI service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -490,6 +524,10 @@ var AgentAPI_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTrace",
 			Handler:    _AgentAPI_GetTrace_Handler,
+		},
+		{
+			MethodName: "Shutdown",
+			Handler:    _AgentAPI_Shutdown_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

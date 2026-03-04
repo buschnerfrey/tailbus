@@ -6,6 +6,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [v0.3.6] — 2026-03-04
+
+### Added
+- `tailbus stop` command — gracefully shuts down the daemon via Shutdown RPC over Unix socket
+
 ## [v0.3.5] — 2026-03-04
 
 ### Added

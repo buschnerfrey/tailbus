@@ -230,8 +230,13 @@ func coordHTTPURL(grpcAddr, override string) string {
 
 // Run starts the daemon and blocks until the context is cancelled.
 func (d *Daemon) Run(ctx context.Context) error {
+	// Derive an inner context so the Shutdown RPC can cancel it
+	innerCtx, innerCancel := context.WithCancel(ctx)
+	defer innerCancel()
+	d.agentServer.SetShutdownFunc(innerCancel)
+
 	// Bind transport to daemon context so streams close on shutdown
-	d.transport.Start(ctx)
+	d.transport.Start(innerCtx)
 
 	// Restore persisted sessions
 	if restored, err := d.msgStore.LoadSessions(); err != nil {
@@ -254,16 +259,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	// Start session eviction (5min TTL, 30s sweep)
-	d.sessions.StartEviction(ctx, 5*time.Minute, 30*time.Second, d.logger)
+	d.sessions.StartEviction(innerCtx, 5*time.Minute, 30*time.Second, d.logger)
 
 	// Start ACK retry loop
-	go d.ackTracker.StartRetryLoop(ctx, time.Second)
+	go d.ackTracker.StartRetryLoop(innerCtx, time.Second)
 
 	// Wire dashboard dependencies
 	d.agentServer.SetDashboardDeps(d.cfg.NodeID, d.resolver, d.transport)
 
 	// Resolve authentication before connecting to coord
-	authToken, err := d.resolveAuth(ctx)
+	authToken, err := d.resolveAuth(innerCtx)
 	if err != nil {
 		return fmt.Errorf("resolve auth: %w", err)
 	}
@@ -304,7 +309,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	cc.SetOnRelayUpdate(func() { d.transport.ConnectToRelays() })
 
 	// Register with coord (retries with exponential backoff)
-	if err := registerWithRetry(ctx, cc, d.logger); err != nil {
+	if err := registerWithRetry(innerCtx, cc, d.logger); err != nil {
 		return fmt.Errorf("register with coord: %w", err)
 	}
 
@@ -313,7 +318,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// When local handles change, re-register with coord so peer map updates immediately
 	d.agentServer.SetOnHandleChange(func(handles []string, manifests map[string]*messagepb.ServiceManifest) {
-		if err := cc.Register(ctx, handles, manifests); err != nil {
+		if err := cc.Register(innerCtx, handles, manifests); err != nil {
 			d.logger.Error("failed to re-register handles with coord", "error", err)
 		}
 	})
@@ -335,8 +340,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Watch peer map in background
 	go func() {
 		for {
-			if err := cc.WatchPeerMap(ctx); err != nil {
-				if ctx.Err() != nil {
+			if err := cc.WatchPeerMap(innerCtx); err != nil {
+				if innerCtx.Err() != nil {
 					return
 				}
 				d.logger.Error("peer map watch error, retrying", "error", err)
@@ -353,23 +358,23 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return cc.Register(ctx, handles, manifests)
 		})
 	}
-	go cc.Heartbeat(ctx, d.agentServer.GetHandles, d.agentServer.GetManifests, 30*time.Second, reRegister)
+	go cc.Heartbeat(innerCtx, d.agentServer.GetHandles, d.agentServer.GetManifests, 30*time.Second, reRegister)
 
 	// Start metrics server if configured
 	if d.cfg.MetricsAddr != "" {
-		go d.metrics.Serve(ctx, d.cfg.MetricsAddr, d.logger)
+		go d.metrics.Serve(innerCtx, d.cfg.MetricsAddr, d.logger)
 	}
 
 	// Start MCP gateway if configured
 	if d.cfg.MCPAddr != "" {
 		gw := mcp.NewGateway(d.agentServer, d.sessions, d.logger)
-		if err := gw.Start(ctx); err != nil {
+		if err := gw.Start(innerCtx); err != nil {
 			d.logger.Error("failed to start MCP gateway", "error", err)
 		} else {
 			go func() {
 				srv := &http.Server{Addr: d.cfg.MCPAddr, Handler: gw.Handler()}
 				go func() {
-					<-ctx.Done()
+					<-innerCtx.Done()
 					srv.Close()
 				}()
 				d.logger.Info("MCP gateway listening", "addr", d.cfg.MCPAddr)
@@ -388,7 +393,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"mcp", d.cfg.MCPAddr,
 	)
 
-	<-ctx.Done()
+	<-innerCtx.Done()
 	d.logger.Info("daemon shutting down")
 	d.agentServer.GracefulStop()
 	d.transport.Close()

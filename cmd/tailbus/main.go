@@ -56,6 +56,8 @@ func main() {
 		fmt.Println("  status    Show login and connection status")
 		fmt.Println("\nTeam commands:")
 		fmt.Println("  team      Manage teams (create, list, members, invite, join, switch)")
+		fmt.Println("\nDaemon commands:")
+		fmt.Println("  stop      Stop the running daemon")
 		fmt.Println("\nMesh commands:")
 		fmt.Println("  register, introspect, list, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
 		os.Exit(1)
@@ -413,6 +415,14 @@ func main() {
 			logger.Error("agent bridge error", "error", err)
 			os.Exit(1)
 		}
+
+	case "stop":
+		_, err := client.Shutdown(ctx, &agentpb.ShutdownRequest{})
+		if err != nil {
+			logger.Error("stop failed", "error", err)
+			os.Exit(1)
+		}
+		fmt.Println("tailbusd stopped")
 
 	case "dashboard":
 		if err := runDashboard(client); err != nil {
