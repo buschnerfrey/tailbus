@@ -711,6 +711,24 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 		}
 	}
 
+	// Build relay statuses
+	var relays []*agentpb.RelayStatus
+	if s.dashResolver != nil {
+		connectedRelays := make(map[string]bool)
+		if s.dashTransport != nil {
+			for _, addr := range s.dashTransport.ConnectedRelayAddrs() {
+				connectedRelays[addr] = true
+			}
+		}
+		for _, ri := range s.dashResolver.GetRelays() {
+			relays = append(relays, &agentpb.RelayStatus{
+				NodeId:    ri.NodeID,
+				Addr:      ri.Addr,
+				Connected: connectedRelays[ri.Addr],
+			})
+		}
+	}
+
 	// Get counters
 	var counters *agentpb.Counters
 	if s.activity != nil {
@@ -724,6 +742,7 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 		Peers:     peers,
 		Sessions:  sessInfos,
 		Counters:  counters,
+		Relays:    relays,
 	}, nil
 }
 

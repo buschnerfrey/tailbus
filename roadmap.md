@@ -328,7 +328,8 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - Dark-theme responsive SPA: agent sidebar with auto-refresh, per-agent chat history, real-time send/receive
 - REST API: `GET /api/agents` (list agents), `POST /api/send` (send message, wait for response)
 - Works on desktop and mobile — zero install, just open the URL
-- Future: topology visualization, session inspector, trace viewer
+- TUI dashboard includes mesh topology view (ASCII graph + compact mode, Tab toggle)
+- Future: session inspector, trace viewer in web UI
 
 ---
 

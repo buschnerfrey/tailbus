@@ -128,6 +128,13 @@ message GetNodeStatusResponse {
   repeated PeerStatus peers = 4;
   repeated SessionInfo sessions = 5;
   Counters counters = 6;
+  repeated RelayStatus relays = 7;
+}
+
+message RelayStatus {
+  string node_id = 1;
+  string addr = 2;
+  bool connected = 3;
 }
 
 message HandleInfo {

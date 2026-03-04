@@ -462,6 +462,17 @@ func (t *GRPCTransport) ConnectedAddrs() []string {
 	return addrs
 }
 
+// ConnectedRelayAddrs returns the list of currently connected relay addresses.
+func (t *GRPCTransport) ConnectedRelayAddrs() []string {
+	t.relayMu.Lock()
+	defer t.relayMu.Unlock()
+	addrs := make([]string, 0, len(t.relayConns))
+	for addr := range t.relayConns {
+		addrs = append(addrs, addr)
+	}
+	return addrs
+}
+
 // Close shuts down the transport.
 func (t *GRPCTransport) Close() error {
 	// Close peer connections first so streams end

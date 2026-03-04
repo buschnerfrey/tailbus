@@ -1,123 +1,205 @@
-# Tailbus
+<p align="center">
+  <h1 align="center">tailbus</h1>
+  <p align="center">
+    <strong>Make your agents reachable from anywhere.</strong>
+    <br />
+    Spin up any process — a Python script, an LLM pipeline, a data service — give it a name,
+    and it's instantly discoverable by every other agent you're running.
+  </p>
+  <p align="center">
+    <a href="https://github.com/alexanderfrey/tailbus/releases"><img src="https://img.shields.io/github/v/release/alexanderfrey/tailbus?style=flat-square&color=blue" alt="Release" /></a>
+    <a href="https://github.com/alexanderfrey/tailbus/actions"><img src="https://img.shields.io/github/actions/workflow/status/alexanderfrey/tailbus/release.yml?style=flat-square" alt="Build" /></a>
+    <a href="#"><img src="https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey?style=flat-square" alt="Platform" /></a>
+    <a href="#"><img src="https://img.shields.io/badge/protocol-A2A%20%2B%20MCP-blueviolet?style=flat-square" alt="Protocol" /></a>
+  </p>
+  <p align="center">
+    <a href="https://tailbus.co">Website</a> · <a href="https://tailbus.co/getting-started">Getting Started</a> · <a href="https://tailbus.co/releases">Releases</a>
+  </p>
+</p>
 
-Agent communication mesh. Tailscale-style topology: a central coordination server for discovery, with a peer-to-peer gRPC data plane between node daemons.
-
-Think of it as **Slack for autonomous agents** — agents register handles, open sessions, exchange messages, and resolve conversations, all routed through a decentralized mesh.
+---
 
 ```
-                       +-----------------+
-                       |  tailbus-coord  |
-                       |  (discovery +   |
-                       |   relay)        |
-                       +--------+--------+
-                        peer map | relay
-                       /  updates|      \
-              +--------+--------+  +--------+--------+
-              |    tailbusd     |  |    tailbusd     |
-              |    (node-1)     |  |    (node-2)     |
-              |  P2P gRPC <----|--|----> P2P gRPC   |
-              +--------+--------+  +--------+--------+
-                 |  Unix socket     Unix socket  |
-                /     \                /     \
-           agent-a   agent-b    agent-c   agent-d
+              ┌─────────────────────┐
+              │    tailbus-coord    │
+              │  discovery + relay  │
+              └──────┬─────┬───────┘
+            peer map │     │ peer map
+           ┌─────────┘     └──────────┐
+           ▼                          ▼
+  ┌─────────────────┐  P2P gRPC  ┌─────────────────┐
+  │    tailbusd      │◄──────────►│    tailbusd      │
+  │   office-mac     │   mTLS    │   cloud-vm       │
+  └──┬───┬───┬───────┘            └──┬───┬───────────┘
+     │   │   │                       │   │
+     ▼   ▼   ▼                       ▼   ▼
+  strategy marketing MCP-gw      finance engineering
+                      │
+                      ▼
+               Claude / Cursor
 ```
+
+**Tailscale-style topology for AI agents.** Central coordination for discovery, peer-to-peer gRPC for data. No port forwarding, no YAML, no reverse proxies — agents register handles and talk to each other across machines, NATs, and cloud VPCs automatically.
+
+## Quick Start
+
+```bash
+# Install (Linux & macOS, no sudo required)
+curl -sSL https://tailbus.co/install | sh
+
+# Start the daemon — login with Google, join the mesh
+tailbusd
+```
+
+Write your first agent in Python:
+
+```bash
+pip install tailbus
+```
+
+```python
+from tailbus import AsyncAgent, Manifest
+
+agent = AsyncAgent("finance",
+    manifest=Manifest(description="Budget queries"))
+
+@agent.on_message
+async def handle(msg):
+    await agent.resolve(msg.session, "Q3 budget: $48,200 remaining")
+
+await agent.run_forever()
+```
+
+That's it — `finance` is now discoverable by every agent on your mesh, across any machine.
+
+> **[Full getting started guide →](https://tailbus.co/getting-started)**
+
+---
+
+## Why tailbus?
+
+Getting agents to talk across machines means solving **four problems yourself**: networking (stable endpoints, TLS, NAT traversal), discovery (how does agent A find agent B?), identity (authentication and mutual trust), and sessions (structured multi-turn conversations).
+
+Each has a point solution — Tailscale for networking, A2A for protocol, OAuth for auth. But nobody bundles them for the person running 3–10 agents across a laptop, a home server, and a cloud VM who doesn't want to become a DevOps engineer to make them collaborate.
+
+Tailbus handles all four with one install.
+
+---
 
 ## Features
 
-- **Handle-based addressing** — agents register names like `marketing`, `sales`, `planner` and message each other without knowing which node they're on
-- **Service manifests** — agents register with a structured `ServiceManifest` (description, commands, tags, version); query via `IntrospectHandle` or discover handles via `ListHandles` with tag filtering
-- **@-mention auto-routing** — when a `text/*` message contains `@handle`, the daemon automatically opens a new session to each mentioned handle
-- **Session lifecycle** — structured conversations with open / message / resolve states
-- **P2P data plane** — messages flow directly between daemons via bidirectional gRPC streams, not through the coord server
-- **Distributed message tracing** — every session gets a `trace_id`; spans are recorded at each hop (created, routed, sent, received, delivered)
-- **Prometheus metrics** — counter and histogram metrics exported at `/metrics` for external monitoring
-- **Real-time TUI dashboard** — terminal dashboard showing handles, peers, sessions, and live activity
-- **DERP-style relay** — when peers can't reach each other directly (NAT, firewalls, different VPCs), messages are transparently forwarded through a relay server; daemons try direct P2P first and fall back automatically; relay is embedded in the coord server by default — every deployment gets NAT traversal for free
-- **mTLS everywhere** — all P2P, relay, and daemon-to-coord connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
-- **Per-connection handle binding** — each gRPC connection owns its registered handles; RPCs enforce `from_handle` ownership; handles auto-cleanup on disconnect
-- **Unix socket token auth** — daemon generates a random auth token file (mode 0600) on startup; CLI and agents present it automatically via gRPC per-RPC credentials; prevents co-tenant handle impersonation
-- **Sequence numbers** — every envelope gets a per-session monotonic sequence number for ordering
-- **Delivery ACKs with retry** — successful delivery generates an ACK back to sender; unacknowledged messages retry with backoff (5s timeout, 3 max retries)
-- **Message persistence** — bbolt-backed store on each daemon; sessions and pending messages survive daemon restarts; ACKed messages purged automatically
-- **MCP gateway** — HTTP server on daemon exposing handles as MCP tools; any MCP-compatible LLM (Claude, ChatGPT, Cursor) can discover and invoke tailbus agents with zero SDK code
-- **Web chat UI** — browser-based chat interface embedded in the daemon binary via `go:embed`; select agents, send messages, view responses in real time at the MCP gateway address
-- **OAuth login flow** — device authorization grant (RFC 8628) for browser-based login; `tailbusd` starts → opens browser → login with Google → machine joins mesh; JWT access tokens (1h) with automatic refresh (30d); credentials persisted at `~/.tailbus/credentials.json`
-- **Coord admission control** — pre-auth token system (like `tailscale up --authkey`) gates which nodes can join the mesh; OAuth login works alongside pre-shared tokens; open mode (no tokens configured) preserves zero-config default
-- **Cloud deployment** — `tailbus-coord` runs on Fly.io at `coord.tailbus.co` with persistent volume for SQLite, edge TLS for OAuth (port 443), TCP passthrough for gRPC (port 8443), embedded relay (port 7443), and Google OAuth; any machine can join with `tailbus login && tailbusd`
-- **Health & readiness endpoints** — `/healthz`, `/readyz`, and `/debug/pprof/*` on daemon metrics port (alongside `/metrics`), coord, and relay servers
-- **Docker Compose** — `docker compose up` for a full mesh with coord + 2 daemons + MCP gateway + example agents in 30 seconds
+### Core
 
-## Install
+- **Handle-based addressing** — agents register names like `marketing` or `finance` and message each other without knowing machines, IPs, or endpoints
+- **@-mention auto-routing** — when a message contains `@handle`, the daemon auto-opens a session to that agent, wherever it lives; agents recruit each other mid-conversation
+- **Structured sessions** — open, exchange messages across multiple turns, and resolve when done; not fire-and-forget API calls
+- **P2P data plane** — messages flow directly between daemons via bidirectional gRPC streams, never through the coord server
+- **NAT traversal** — DERP-style relay with direct connection upgrade; agents behind home NATs, corporate firewalls, or private VPCs connect without port forwarding
+- **mTLS everywhere** — all connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
 
-One-liner install from GitHub Releases (Linux and macOS):
+### MCP Gateway
 
-```bash
-curl -sSL https://raw.githubusercontent.com/alexanderfrey/tailbus/main/install.sh | sh
+Every tailbus daemon includes a built-in [MCP](https://modelcontextprotocol.io/) gateway. Add one line to your Claude or Cursor config:
+
+```json
+{
+  "mcpServers": {
+    "tailbus": {
+      "url": "http://localhost:1423/mcp"
+    }
+  }
+}
 ```
 
-This detects your OS/architecture, downloads the latest release, and installs all three binaries to `/usr/local/bin` (or `~/.local/bin` if no sudo).
+Every registered handle becomes a callable tool. If your agent declares commands in its manifest, each command becomes a separate tool (e.g., `finance.budget`, `calculator.add`). Claude and Cursor can invoke agents on your mesh — including agents on other machines — through one endpoint.
 
-Then start the daemon — it handles login automatically:
+### Observability
 
-```bash
-tailbusd          # opens browser → login with Google → machine joins mesh
-```
+- **Distributed tracing** — every session gets a `trace_id`; spans are recorded at each hop
+- **Prometheus metrics** — counters and histograms at `/metrics` for external monitoring
+- **Real-time TUI dashboard** — terminal UI with mesh topology view, handles, peers, sessions, and live activity
+- **Web chat UI** — browser-based interface embedded in the daemon for testing and debugging
 
-Or authenticate separately:
+### Reliability
 
-```bash
-tailbus login     # authenticate without starting daemon
-tailbus status    # check connection status
-tailbus logout    # remove saved credentials
-```
+- **Delivery ACKs** — automatic retry with at-least-once delivery guarantees (5s timeout, 3 retries)
+- **Message persistence** — bbolt-backed store; sessions and pending messages survive daemon restarts
+- **Sequence numbers** — per-session monotonic ordering
+- **OAuth login** — device authorization flow (RFC 8628) with Google; JWT tokens with automatic refresh
 
-## Prerequisites (building from source)
+### Developer Experience
 
-- **Go 1.25+** (no CGo required)
-- **protoc** with `protoc-gen-go` and `protoc-gen-go-grpc` (only needed if modifying `.proto` files)
+- **Python SDK** — async and sync APIs, zero external dependencies, Python 3.10+
+- **Stdio JSON-lines bridge** — `tailbus agent` for any language; read/write newline-delimited JSON on stdin/stdout
+- **Service manifests** — agents declare capabilities, commands (with JSON Schema), tags, and version
+- **Docker Compose** — full mesh with example agents in 30 seconds
 
-## Build
+---
 
-```bash
-make build
-```
+## How It Works
 
-This produces four binaries in `bin/`:
-
-| Binary | Description |
-|--------|-------------|
-| `bin/tailbus-coord` | Coordination server (discovery + peer map) |
-| `bin/tailbusd` | Node daemon (local agent server + P2P transport) |
-| `bin/tailbus` | CLI tool for interacting with a local daemon |
-| `bin/tailbus-relay` | Relay server for NAT traversal |
-
-Other Makefile targets:
+### 1. Install and login
 
 ```bash
-make proto      # Regenerate protobuf Go code
-make test       # Run unit tests
-make test-all   # Run all tests including integration
-make clean      # Remove binaries and generated code
+curl -sSL https://tailbus.co/install | sh
+tailbusd    # opens browser → Google login → machine joins mesh
 ```
 
-## Quick Start (Docker Compose)
+### 2. Register agents
 
-The fastest way to try tailbus — a full mesh with MCP gateway in 30 seconds:
+Agents connect to the local daemon via Unix socket and register a handle:
+
+```python
+from tailbus import AsyncAgent
+
+agent = AsyncAgent("marketing")
+
+@agent.on_message
+async def handle(msg):
+    print(f"From {msg.from_handle}: {msg.payload}")
+    await agent.resolve(msg.session, "Got it!")
+
+await agent.run_forever()
+```
+
+### 3. Agents talk across machines
+
+```python
+# On any machine on your mesh
+from tailbus import AsyncAgent
+
+agent = AsyncAgent("strategy")
+response = await agent.open_session("marketing", "Draft the Q3 campaign plan")
+print(response.payload)
+```
+
+The daemon resolves `marketing` to its machine, opens a P2P gRPC connection (with mTLS and NAT traversal), and delivers the message. No IPs, no endpoints, no routing config.
+
+### 4. @-mention to recruit agents mid-session
+
+```
+strategy → "Campaign looks good. @finance can you confirm we have budget?
+             And @legal we need sign-off on the influencer contracts."
+```
+
+The mesh resolves each @-handle, auto-opens sessions to `finance` and `legal` — on different machines, behind different NATs — and delivers the message.
+
+---
+
+## Examples
+
+### Docker Compose (30 seconds)
 
 ```bash
 docker compose up --build
 ```
 
-This starts: coord server + 2 daemons + MCP gateway with web UI (port 8080) + 4 example Python agents (calculator, echo, orchestrator, LLM assistant).
+Starts: coord + 2 daemons + MCP gateway with web UI (port 8080) + 4 example agents (calculator, echo, orchestrator, LLM assistant).
 
-Open http://localhost:8080 in your browser for the chat UI — select an agent from the sidebar and start chatting. The web UI auto-generates input forms for agents with structured commands (like calculator).
-
-If you have [LM Studio](https://lmstudio.ai/) running on port 1234, the **assistant** agent will route messages to your local LLM.
-
-Test with curl:
+Open http://localhost:8080 for the chat UI. Test with curl:
 
 ```bash
-# List available agents as MCP tools
+# List available agents
 curl -s localhost:8080/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | jq '.result.tools[].name'
 
@@ -125,18 +207,14 @@ curl -s localhost:8080/mcp \
 curl -s localhost:8080/mcp \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"calculator.add","arguments":{"a":2,"b":3}}}' | jq
 
-# Call the echo agent (runs on a different node — demonstrates cross-node P2P)
+# Cross-node P2P
 curl -s localhost:8080/mcp \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello tailbus"}}}' | jq
-
-# Call the orchestrator (delegates to calculator and echo)
-curl -s localhost:8080/mcp \
-  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"orchestrator.compute","arguments":{"operation":"multiply","a":6,"b":7}}}' | jq
 ```
 
-## Multi-Agent LLM Collaboration
+### Multi-Agent LLM Collaboration
 
-The `examples/multi-agent/` directory demonstrates three LLM-powered agents collaborating through the mesh — all using a single local LM Studio instance:
+Three LLM-powered agents collaborating through the mesh — all using a single local [LM Studio](https://lmstudio.ai/) instance:
 
 | Agent | Role |
 |-------|------|
@@ -149,590 +227,31 @@ cd examples/multi-agent
 docker compose up --build
 ```
 
-Open http://localhost:8080, click **researcher**, and ask it to investigate any topic. The pipeline runs: researcher → critic → writer, with each step as a separate LLM call through a separate agent on the mesh.
+Open http://localhost:8080, click **researcher**, and ask it to investigate any topic. The pipeline runs: researcher → critic → writer, each as a separate agent on the mesh.
 
-For cross-network deployment (mesh spanning multiple machines), see `examples/multi-machine/`.
+### 3-Machine Demo
 
-## Cloud Deployment (Fly.io)
+A travel agency scenario across 3 physical machines:
 
-The public coord server runs on Fly.io at `coord.tailbus.co`. To join the mesh from any machine:
+| Machine | Agents |
+|---------|--------|
+| A (coord + daemon) | `concierge` (orchestrator) |
+| B (daemon) | `flights`, `hotels` (booking) |
+| C (daemon) | `weather`, `currency` (data) |
 
-```bash
-tailbus login     # authenticate with Google
-tailbusd          # start daemon, auto-joins the mesh
-```
+See [`examples/demo/README.md`](examples/demo/README.md) for the full walkthrough.
 
-To deploy your own coord server to Fly.io:
-
-```bash
-fly apps create my-tailbus-coord
-fly volumes create coord_data --region fra --size 1
-fly secrets set OAUTH_CLIENT_ID=... OAUTH_CLIENT_SECRET=...
-fly deploy --build-target coord
-fly certs add coord.my-domain.com
-```
-
-The `fly.toml` and `deploy/coord.toml` in the repo are pre-configured:
-- OAuth HTTP on internal `:8080` → public port 443 via Fly edge TLS
-- gRPC on `:8443` → public port 8443 via TCP passthrough (coord handles mTLS)
-- Embedded relay on `:7443` → public port 7443 via TCP passthrough (NAT traversal for all users)
-- Health check on `:8081`
-- Persistent volume at `/data` for SQLite + keys
-- OAuth client ID/secret read from env vars (`OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`)
-
-## Quick Start (from source)
-
-### 1. Start the coordination server
-
-```bash
-./bin/tailbus-coord -listen :8443 -data-dir /tmp/tailbus-coord
-```
-
-Or with a config file:
-
-```bash
-./bin/tailbus-coord -config examples/dev/coord.toml
-```
-
-### 2. Start two node daemons
-
-```bash
-# Terminal 2 — node-1
-./bin/tailbusd -config examples/dev/daemon1.toml
-
-# Terminal 3 — node-2
-./bin/tailbusd -config examples/dev/daemon2.toml
-```
-
-Or using flags directly:
-
-```bash
-./bin/tailbusd \
-  -node-id node-1 \
-  -coord 127.0.0.1:8443 \
-  -advertise 127.0.0.1:9443 \
-  -listen :9443 \
-  -socket /tmp/tailbusd-1.sock
-```
-
-### (Optional) Enable the embedded relay
-
-The coord server can embed a relay for NAT traversal — no separate binary needed:
-
-```bash
-./bin/tailbus-coord -listen :8443 -data-dir /tmp/tailbus-coord -relay-addr :7443
-```
-
-Or in `coord.toml`:
-
-```toml
-relay_addr = ":7443"
-relay_advertise_addr = "my-coord-host:7443"  # what daemons connect to
-```
-
-The embedded relay registers itself in the peer map automatically. Daemons discover it and fall back to it when direct P2P connections fail.
-
-You can still run a standalone relay if preferred:
-
-```bash
-./bin/tailbus-relay -listen :7443 -coord 127.0.0.1:8443
-```
-
-### 3. Register agents and exchange messages
-
-```bash
-# Register handles on each node
-./bin/tailbus -socket /tmp/tailbusd-1.sock register marketing
-./bin/tailbus -socket /tmp/tailbusd-2.sock register sales
-
-# Subscribe to incoming messages (blocking — run in separate terminals)
-./bin/tailbus -socket /tmp/tailbusd-1.sock subscribe marketing
-./bin/tailbus -socket /tmp/tailbusd-2.sock subscribe sales
-
-# Open a session from marketing to sales
-./bin/tailbus -socket /tmp/tailbusd-1.sock open marketing sales "Need Q4 numbers"
-# Output: Session: <session-id>  Message: <message-id>
-
-# Reply from sales
-./bin/tailbus -socket /tmp/tailbusd-2.sock send <session-id> sales "Q4 revenue: $1.2M"
-
-# Resolve the session
-./bin/tailbus -socket /tmp/tailbusd-1.sock resolve <session-id> marketing "Thanks!"
-```
-
-### 4. Observe
-
-```bash
-# Launch the TUI dashboard
-./bin/tailbus -socket /tmp/tailbusd-1.sock dashboard
-
-# List sessions for a handle
-./bin/tailbus -socket /tmp/tailbusd-1.sock sessions marketing
-
-# View a distributed trace
-./bin/tailbus -socket /tmp/tailbusd-1.sock trace <trace-id>
-
-# Scrape Prometheus metrics
-curl http://localhost:9090/metrics
-```
-
-## 3-Machine Demo
-
-The `examples/demo/` directory contains a ready-made travel agency scenario across 3 machines:
-
-| Machine | Role | Agents |
-|---------|------|--------|
-| A | Coord + daemon | `concierge` (orchestrator) |
-| B | Daemon only | `flights`, `hotels` (booking) |
-| C | Daemon only | `weather`, `currency` (data) |
-
-Quick version:
-
-```bash
-# Install on all 3 machines
-curl -sSL https://raw.githubusercontent.com/alexanderfrey/tailbus/main/install.sh | sh
-
-# Machine A: start coord + daemon, register agents
-tailbus-coord -config coord.toml
-tailbusd -config machine-a.toml       # after replacing __COORD_IP__ and __MY_IP__
-./register-agents.sh machine-a
-
-# Machine B & C: start daemon, register agents
-tailbusd -config machine-b.toml
-./register-agents.sh machine-b
-
-# From any machine: discover and interact
-tailbus list                           # all 5 agents across the mesh
-tailbus list booking                   # filter by tag
-tailbus introspect flights             # full manifest
-tailbus open concierge flights "Search NYC to London, Dec 20-27"
-```
-
-See [`examples/demo/README.md`](examples/demo/README.md) for the full step-by-step walkthrough.
-
-## Configuration
-
-Both the coord server and daemon accept TOML config files via `-config`. Example files are in `examples/dev/`.
-
-### Coordination server (`tailbus-coord`)
-
-```toml
-listen_addr = ":8443"
-data_dir = "/tmp/tailbus-coord"
-key_file = "/tmp/tailbus-coord/coord.key"
-# auth_tokens = ["changeme"]
-
-# Embedded relay (NAT traversal without a separate relay binary)
-# relay_addr = ":7443"
-# relay_advertise_addr = "coord.tailbus.co:7443"
-
-# OAuth configuration (enables browser-based login)
-oauth_http_addr = ":8080"
-# external_url = "https://coord.tailbus.co"  # set when behind edge TLS (e.g. Fly.io)
-# insecure_grpc = false  # disable gRPC TLS when edge TLS terminates it
-# jwt_secret = ""  # optional override, auto-generated if empty
-
-# [[oauth_providers]]
-# name = "google"
-# issuer = "https://accounts.google.com"
-# client_id = "YOUR_CLIENT_ID.apps.googleusercontent.com"
-# client_secret = "YOUR_CLIENT_SECRET"
-```
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `listen_addr` | `:8443` | gRPC listen address |
-| `data_dir` | `.` | Directory for SQLite database (pure-Go, no CGo) |
-| `key_file` | `{data_dir}/coord.key` | Coord keypair file for mTLS (auto-generated if missing) |
-| `auth_tokens` | `[]` | Pre-auth tokens for admission control; if set, nodes must present one to register |
-| `oauth_http_addr` | `:8080` | HTTP listen address for OAuth endpoints (device flow + callback) |
-| `external_url` | (none) | Public base URL for OAuth callbacks (e.g. `https://coord.tailbus.co`); if unset, defaults to `http://localhost:{oauth_http_addr}` |
-| `insecure_grpc` | `false` | Disable gRPC server TLS (use when edge TLS terminates it, e.g. Fly.io HTTP handler) |
-| `relay_addr` | (none) | Listen address for embedded relay (e.g. `:7443`); empty = relay disabled |
-| `relay_advertise_addr` | same as `relay_addr` | Address daemons connect to for relay (e.g. `coord.tailbus.co:7443`) |
-| `jwt_secret` | (auto) | HMAC-SHA256 signing key for JWTs; auto-generated at `{data_dir}/jwt.key` if empty |
-| `oauth_providers` | `[]` | OIDC providers for browser login (see example above) |
-
-**Flags:**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-health-addr` | `:8080` | Health/readiness/pprof HTTP endpoint (empty string disables) |
-| `-auth-token` | (none) | Comma-separated pre-auth tokens (merged with config file tokens) |
-
-### Relay server (`tailbus-relay`)
-
-```toml
-relay_id = "relay-1"
-coord_addr = "127.0.0.1:8443"
-listen_addr = ":7443"
-key_file = "/tmp/tailbus-relay.key"
-# auth_token = "changeme"
-```
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `relay_id` | `relay-{hostname}` | Unique identifier for this relay |
-| `coord_addr` | `127.0.0.1:8443` | Coordination server address |
-| `listen_addr` | `:7443` | gRPC listen address for daemon connections |
-| `key_file` | `/tmp/tailbus-relay-{id}.key` | Relay keypair file (auto-generated if missing) |
-| `auth_token` | (none) | Auth token for coord admission control |
-
-**Flags:**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-health-addr` | `:8080` | Health/readiness/pprof HTTP endpoint (empty string disables) |
-| `-auth-token` | (none) | Auth token for coord admission control |
-
-### Node daemon (`tailbusd`)
-
-```toml
-node_id = "node-1"
-coord_addr = "coord.tailbus.co:8443"
-advertise_addr = "127.0.0.1:9443"
-listen_addr = ":9443"
-socket_path = "/tmp/tailbusd-1.sock"
-key_file = "/tmp/tailbusd-node1.key"
-metrics_addr = ":9090"
-mcp_addr = ":8080"
-# auth_token = "changeme"        # skip OAuth, use pre-shared token
-# credential_file = "~/.tailbus/credentials.json"
-```
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `node_id` | hostname | Unique identifier for this node |
-| `coord_addr` | `coord.tailbus.co:8443` | Coordination server address |
-| `advertise_addr` | (required) | Address other daemons use to reach this node |
-| `listen_addr` | `:9443` | P2P gRPC listen address |
-| `socket_path` | `/tmp/tailbusd.sock` | Unix socket for local agent connections |
-| `key_file` | `/tmp/tailbusd-{nodeID}.key` | Node keypair file (auto-generated if missing) |
-| `metrics_addr` | `:9090` | Prometheus + health/pprof HTTP endpoint (empty string disables) |
-| `mcp_addr` | (none) | MCP gateway HTTP listen address (empty string disables) |
-| `auth_token` | (none) | Pre-shared auth token for coord; if set, skips OAuth login entirely |
-| `credential_file` | `~/.tailbus/credentials.json` | Path to saved OAuth credentials |
-| `oauth_url` | (auto) | OAuth HTTP URL override; auto-detected from `coord_addr` (localhost → `http://localhost:8080`, remote → `https://{host}`) |
-
-All config fields can be overridden with command-line flags. Run any binary with `-help` to see available flags.
-
-## CLI Reference
-
-```
-tailbus [flags] <command> [args]
-```
-
-**Global flags:**
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-socket` | `/tmp/tailbusd.sock` | Path to local daemon Unix socket |
-
-**Auth commands** (no daemon connection needed):
-
-| Command | Usage | Description |
-|---------|-------|-------------|
-| `login` | `login [--coord addr]` | Run device auth flow, save credentials, print email |
-| `logout` | `logout` | Remove saved credentials |
-| `status` | `status` | Show login status, email, token expiry, daemon connection |
-
-**Mesh commands** (requires running daemon):
-
-| Command | Usage | Description |
-|---------|-------|-------------|
-| `register` | `register <handle> [-description "..."] [-tags "a,b"] [-version "1.0"]` | Register an agent handle with optional manifest |
-| `introspect` | `introspect <handle>` | Show the full service manifest for a handle |
-| `list` | `list [tags]` | List all handles, optionally filtered by comma-separated tags |
-| `open` | `open <from> <to> <message>` | Open a new session with an initial message |
-| `send` | `send <session-id> <from> <message>` | Send a message within an existing session |
-| `subscribe` | `subscribe <handle>` | Stream incoming messages (blocks until Ctrl-C) |
-| `resolve` | `resolve <session-id> <from> [message]` | Resolve (close) a session with an optional final message |
-| `sessions` | `sessions <handle>` | List sessions involving a handle |
-| `dashboard` | `dashboard` | Launch interactive TUI dashboard |
-| `trace` | `trace <trace-id>` | Display distributed trace spans for a trace ID |
-| `agent` | `agent` | Stdio JSON-lines bridge for scripting and LLM agents |
-
-## Distributed Tracing
-
-Every session is assigned a `trace_id` (auto-generated UUID, or agent-provided for external correlation). The trace ID propagates on every envelope in that session. Spans are recorded at each hop:
-
-| Action | Where | Description |
-|--------|-------|-------------|
-| `MESSAGE_CREATED` | AgentServer | Message created (open, send, or resolve) |
-| `ROUTED_LOCAL` | MessageRouter | Delivered to a local subscriber |
-| `ROUTED_REMOTE` | MessageRouter | Forwarded to a remote peer |
-| `SENT_TO_TRANSPORT` | GRPCTransport | Successfully sent over P2P stream |
-| `RECEIVED_FROM_TRANSPORT` | Daemon | Received from P2P stream |
-| `DELIVERED_TO_SUBSCRIBER` | AgentServer | Delivered to agent subscriber channel |
-
-Spans are stored in an in-memory ring buffer (10,000 spans per node). Query via CLI:
-
-```bash
-$ ./bin/tailbus trace 1ee8ae5a-61fe-495f-a9e0-ae4395ef2f40
-
-Trace 1ee8ae5a-61fe-495f-a9e0-ae4395ef2f40 (6 spans):
-
-  15:51:35.345  TRACE_ACTION_MESSAGE_CREATED      msg:42c03d06  node:node-1
-  15:51:35.346  TRACE_ACTION_SENT_TO_TRANSPORT     msg:42c03d06  node:node-1
-  15:51:35.346  TRACE_ACTION_ROUTED_REMOTE         msg:42c03d06  node:node-1
-  15:51:35.349  TRACE_ACTION_MESSAGE_CREATED       msg:9ceb8279  node:node-1
-  15:51:35.349  TRACE_ACTION_SENT_TO_TRANSPORT     msg:9ceb8279  node:node-1
-  15:51:35.349  TRACE_ACTION_ROUTED_REMOTE         msg:9ceb8279  node:node-1
-```
-
-Or programmatically via the `GetTrace` gRPC RPC on the AgentAPI.
-
-> **Note:** `GetTrace` returns spans from the local node only. For cross-node traces, query each node's daemon separately.
-
-## Prometheus Metrics
-
-When `metrics_addr` is configured (default `:9090`), the daemon exposes `/metrics`, `/healthz`, `/readyz`, and `/debug/pprof/*` endpoints:
-
-```bash
-curl http://localhost:9090/metrics     # Prometheus metrics
-curl http://localhost:9090/healthz     # → {"status":"ok"}
-curl http://localhost:9090/readyz      # → {"status":"ready"} (after coord registration)
-curl http://localhost:9090/debug/pprof/ # pprof index
-```
-
-**Counters** (read from ActivityBus atomics at scrape time, no double-counting):
-
-| Metric | Description |
-|--------|-------------|
-| `tailbus_messages_routed_total` | Total messages routed (local + remote) |
-| `tailbus_messages_delivered_local_total` | Messages delivered to local subscribers |
-| `tailbus_messages_sent_remote_total` | Messages sent to remote peers |
-| `tailbus_messages_received_remote_total` | Messages received from remote peers |
-| `tailbus_sessions_opened_total` | Total sessions opened |
-| `tailbus_sessions_resolved_total` | Total sessions resolved |
-
-**Histograms:**
-
-| Metric | Description |
-|--------|-------------|
-| `tailbus_message_routing_duration_seconds` | Time to route a message (resolve + deliver/send) |
-| `tailbus_session_lifetime_seconds` | Duration from session open to resolve |
-
-To disable metrics, pass `--metrics ""` or set `metrics_addr = ""` in the config file.
-
-## TUI Dashboard
-
-The interactive dashboard provides a real-time view of the local daemon:
-
-```bash
-./bin/tailbus dashboard
-```
-
-**Panels:**
-- **Handles** — registered agent handles with subscriber counts
-- **Peers** — remote nodes with connection status
-- **Sessions** — open and resolved sessions
-- **Activity** — live feed of message routes, session events, and registrations (includes trace ID prefixes)
-
-**Keyboard shortcuts:**
-- `q` / `Ctrl+C` — quit
-- `r` — refresh status
-- `c` — clear activity feed
-
-## MCP Gateway
-
-The MCP (Model Context Protocol) gateway lets any MCP-compatible LLM client discover and invoke tailbus agents as tools — no SDK needed.
-
-Enable with `-mcp :8080` on the daemon (or `mcp_addr = ":8080"` in config). The gateway:
-
-- Registers as an internal `_mcp_gateway` handle on the mesh
-- Exposes all handles as MCP tools via `tools/list`
-- Maps each handle's `CommandSpec` to an individual tool (e.g., `calculator.add`, `calculator.multiply`)
-- Handles without commands get a generic tool named after the handle
-- `tools/call` opens a session, sends the payload, waits for the response (30s timeout), and returns the result
-
-**Endpoints:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/mcp` | JSON-RPC 2.0 requests (`initialize`, `tools/list`, `tools/call`, `ping`) |
-| `GET`  | `/mcp` | SSE stream for server-initiated messages |
-| `GET`  | `/api/agents` | REST: list all agents as JSON |
-| `POST` | `/api/send` | REST: send a message to an agent (`{"handle":"…","message":"…"}`) |
-| `GET`  | `/` | Web chat UI (embedded static files) |
-
-**Example: configure as MCP server in Claude Desktop**
-
-```json
-{
-  "mcpServers": {
-    "tailbus": {
-      "url": "http://localhost:8080/mcp"
-    }
-  }
-}
-```
-
-## Architecture
-
-```
-proto/tailbus/v1/           Protocol buffer definitions
-  messages.proto              Envelope, EnvelopeType, ServiceManifest, CommandSpec
-  agent.proto                 AgentAPI service (local daemon <-> agents)
-  coord.proto                 CoordinationAPI service (daemon <-> coord)
-  transport.proto             NodeTransport service (daemon <-> daemon P2P)
-
-internal/
-  coord/                    Coordination server
-    server.go                 gRPC server implementation
-    store.go                  SQLite-backed persistence (nodes, handles, auth_tokens, users)
-    registry.go               Node registration
-    peermap.go                Peer map distribution
-    jwt.go                    JWT issuing and validation (HMAC-SHA256)
-    oauth.go                  RFC 8628 device authorization flow + OIDC
-    admission.go              Node admission (pre-shared tokens + JWT)
-    oauth_web/verify.html     Embedded verification page (go:embed)
-
-  auth/                     Client-side authentication
-    credentials.go            Persistent credential storage (~/.tailbus/credentials.json)
-    device_flow.go            Device authorization client (RFC 8628)
-    refresh.go                Token refresh logic
-
-  daemon/                   Node daemon
-    daemon.go                 Main orchestrator (wires all components)
-    agentserver.go            AgentAPI gRPC server (Unix socket, handle binding)
-    coordclient.go            Coord server gRPC client (mTLS + TOFU)
-    router.go                 Message routing (local vs remote)
-    acktracker.go             Delivery ACK tracking and retry
-    msgstore.go               bbolt-backed persistence for sessions and pending messages
-    activitybus.go            In-process pub/sub for observability
-    tracestore.go             Ring buffer trace span storage
-    metrics.go                Prometheus collector + HTTP server (includes health routes)
-
-  mcp/                      MCP gateway + web UI
-    gateway.go                HTTP+SSE server exposing handles as MCP tools
-    embed.go                  go:embed for static web assets
-    web/index.html            Single-page chat UI (HTML/CSS/JS)
-
-  health/                   Health, readiness, and pprof endpoints
-
-  transport/                P2P data plane
-    transport.go              Transport interface
-    grpc.go                   Bidirectional gRPC stream implementation (mTLS + relay fallback)
-    peerverifier.go           Peer certificate verification against peer map + relays
-
-  relay/                    NAT traversal relay
-    server.go                 DERP-style relay: Exchange handler, stream mapping, forwarding
-                              Supports both mTLS (cert-based) and insecure (metadata-based) peer identification
-
-  handle/                   Handle resolution
-  session/                  Session lifecycle state machine (with sequence counters)
-  identity/                 Keypair generation, mTLS certs, and TOFU verification
-  config/                   TOML configuration loading
-```
-
-### Message flow
-
-1. Agent calls `OpenSession` / `SendMessage` / `ResolveSession` via Unix socket (ownership of `from_handle` is verified against the connection)
-2. `AgentServer` creates the envelope with a monotonic sequence number, records a trace span, and passes it to `MessageRouter`
-3. `MessageRouter` checks if destination handle is local:
-   - **Local**: delivers directly to subscriber channels, records `ROUTED_LOCAL` span
-   - **Remote**: resolves handle to peer address via `Resolver`, sends via `GRPCTransport` (mTLS), records `ROUTED_REMOTE` span, registers with `AckTracker`
-4. `GRPCTransport` attempts direct P2P first. On failure, falls back to relay (stamps `relay_target_key` on the envelope). Failed direct addresses are cached for 60s.
-5. Direct or relay: fires `OnSend` callback (`SENT_TO_TRANSPORT` span)
-6. Remote daemon receives via `OnReceive` callback (`RECEIVED_FROM_TRANSPORT` span), delivers to local subscribers (`DELIVERED_TO_SUBSCRIBER` span)
-7. On successful delivery, an `ACK` envelope is sent back to the sender; the `AckTracker` removes the message from pending (both in-memory and bbolt). Unacknowledged messages are retried (5s timeout, up to 3 retries). On daemon restart, pending messages and sessions are restored from bbolt and retries resume.
-
-### Protocol
-
-All inter-component communication uses **gRPC** with Protocol Buffers:
-
-- **AgentAPI** — agents connect to their local daemon via **Unix socket** (with token auth and per-connection handle ownership enforcement)
-- **CoordinationAPI** — daemons connect to the coord server via **mTLS over TCP** (TOFU cert pinning on first connect)
-- **NodeTransport** — daemons connect to each other via **mTLS over TCP** (peer certs verified against the peer map); when direct connection fails, daemons connect to a relay server using the same `Exchange` stream and mTLS
-
-## Stdio Agent Bridge
-
-The `tailbus agent` subcommand provides a **JSON-lines stdio bridge** so any process can communicate with tailbus by reading/writing newline-delimited JSON on stdin/stdout — no protobuf or gRPC client needed. This is ideal for scripting languages, LLM tool-use agents, and quick integrations.
-
-```bash
-# Start the bridge (reads JSON commands from stdin, writes JSON to stdout, logs to stderr)
-./bin/tailbus agent
-```
-
-### Protocol
-
-**Inbound (stdin)** — one JSON object per line:
-
-```jsonl
-{"type":"register","handle":"marketing","manifest":{"description":"Marketing team agent","tags":["marketing","comms"],"version":"1.0","commands":[{"name":"campaign","description":"Run a campaign"}]}}
-{"type":"register","handle":"simple-agent","description":"Legacy plain description"}
-{"type":"introspect","handle":"sales"}
-{"type":"list"}
-{"type":"list","tags":["marketing"]}
-{"type":"open","to":"sales","payload":"Need Q4 numbers"}
-{"type":"open","to":"sales","payload":"{}","content_type":"application/json","trace_id":"my-id"}
-{"type":"send","session":"<id>","payload":"Q4 revenue: $1.2M"}
-{"type":"resolve","session":"<id>","payload":"Thanks!"}
-{"type":"resolve","session":"<id>"}
-{"type":"sessions"}
-```
-
-- `register` must be the first command (one registration per process)
-- `manifest` on `register` is optional — structured description of capabilities (description, commands, tags, version)
-- `description` on `register` is deprecated but still supported for backward compatibility
-- `introspect` returns the full manifest for a handle (no registration required)
-- `list` returns all known handles; optionally filter by `tags` array
-- `describe` is still accepted as an alias for `introspect`
-- `content_type` defaults to `text/plain` if omitted
-- `trace_id` on `open` is optional (auto-generated if omitted)
-- `payload` on `resolve` is optional
-
-**Outbound (stdout)** — one JSON object per line:
-
-```jsonl
-{"type":"registered","handle":"marketing"}
-{"type":"introspected","handle":"sales","found":true,"manifest":{"description":"Sales team agent","tags":["sales"],"version":"1.0","commands":[{"name":"quote","description":"Get a quote"}]}}
-{"type":"handles","entries":[{"handle":"marketing","manifest":{"description":"Marketing team agent","tags":["marketing"]}},{"handle":"sales","manifest":{"description":"Sales team agent","tags":["sales"]}}]}
-{"type":"opened","session":"<id>","message_id":"<id>","trace_id":"<id>"}
-{"type":"sent","message_id":"<id>"}
-{"type":"resolved","message_id":"<id>"}
-{"type":"message","session":"<id>","from":"sales","to":"marketing","payload":"hi","content_type":"text/plain","message_type":"session_open","trace_id":"<id>","message_id":"<id>","sent_at":1709391095}
-{"type":"sessions","sessions":[{"session":"<id>","from":"a","to":"b","state":"open"}]}
-{"type":"error","error":"session not found","request_type":"send"}
-```
-
-- Incoming messages from other agents appear as `type: "message"`
-- `message_type` is one of: `session_open`, `message`, `session_resolve`, `ack`
-- Errors include `request_type` for correlation
-- The bridge exits on stdin EOF or SIGINT
-
-### Example: Python agent (raw subprocess)
-
-```python
-import subprocess, json
-
-proc = subprocess.Popen(
-    ["./bin/tailbus", "-socket", "/tmp/tailbusd.sock", "agent"],
-    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
-)
-
-def send(cmd):
-    proc.stdin.write(json.dumps(cmd) + "\n")
-    proc.stdin.flush()
-    return json.loads(proc.stdout.readline())
-
-print(send({"type": "register", "handle": "my-python-agent"}))
-print(send({"type": "open", "to": "sales", "payload": "hello from python"}))
-```
+---
 
 ## Python SDK
 
-The `tailbus` Python package (`sdk/python/`) wraps the stdio bridge in a clean async/sync API with zero external dependencies. Requires Python 3.10+.
-
-### Install
+Full async and sync APIs with zero external dependencies. Python 3.10+.
 
 ```bash
-pip install sdk/python/         # from source
-# or: pip install tailbus       # once published to PyPI
+pip install tailbus
 ```
 
-### Async usage
+### Async
 
 ```python
 from tailbus import AsyncAgent, Manifest, CommandSpec
@@ -751,7 +270,7 @@ async def main():
         handles = await agent.list_handles()
         print([h.handle for h in handles])
 
-        # Open a session and exchange messages
+        # Open a session
         opened = await agent.open_session("sales", "Need Q4 numbers")
         await agent.send(opened.session, "follow-up details")
         await agent.resolve(opened.session, "Thanks!")
@@ -759,7 +278,7 @@ async def main():
 asyncio.run(main())
 ```
 
-### Sync usage
+### Sync
 
 ```python
 from tailbus import SyncAgent
@@ -793,32 +312,337 @@ async def main():
 asyncio.run(main())
 ```
 
-## @-Mention Auto-Routing
+---
 
-When a `text/*` message contains `@handle` patterns, the daemon automatically opens new sessions from the sender to each mentioned handle. This enables Twitter-style routing:
+## CLI Reference
 
-```bash
-# Register two agents
-./bin/tailbus -socket /tmp/tailbusd-1.sock register marketing
-./bin/tailbus -socket /tmp/tailbusd-1.sock register sales
-
-# Subscribe to incoming messages
-./bin/tailbus -socket /tmp/tailbusd-1.sock subscribe sales &
-
-# Send a message mentioning @sales — a new session is auto-opened to sales
-./bin/tailbus -socket /tmp/tailbusd-1.sock open marketing planner "@sales can you send Q4 numbers?"
-# sales subscriber receives a session_open with the full message
+```
+tailbus [flags] <command> [args]
 ```
 
-Rules:
-- Only `text/*` content types are scanned for mentions
-- The sender (`fromHandle`) and direct recipient (`toHandle`) are excluded from mention scanning
-- Each mention opens an independent session with the original payload
-- Mention routing is best-effort: failures are logged but never block the primary message
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-socket` | `/tmp/tailbusd.sock` | Path to local daemon Unix socket |
+
+### Auth commands
+
+| Command | Description |
+|---------|-------------|
+| `login [--coord addr]` | Device auth flow, save credentials |
+| `logout` | Remove saved credentials |
+| `status` | Show login status, email, token expiry |
+
+### Mesh commands
+
+| Command | Description |
+|---------|-------------|
+| `register <handle> [-description "..."] [-tags "a,b"] [-version "1.0"]` | Register an agent handle with optional manifest |
+| `introspect <handle>` | Show full service manifest |
+| `list [tags]` | List handles, optionally filtered by tags |
+| `open <from> <to> <message>` | Open a new session |
+| `send <session-id> <from> <message>` | Send within a session |
+| `subscribe <handle>` | Stream incoming messages |
+| `resolve <session-id> <from> [message]` | Close a session |
+| `sessions <handle>` | List sessions for a handle |
+| `dashboard` | Interactive TUI dashboard |
+| `trace <trace-id>` | Show distributed trace spans |
+| `agent` | Stdio JSON-lines bridge |
+
+---
+
+## Stdio Agent Bridge
+
+For languages without a dedicated SDK, `tailbus agent` provides a JSON-lines bridge over stdin/stdout:
+
+```bash
+tailbus agent
+```
+
+**Inbound (stdin):**
+
+```jsonl
+{"type":"register","handle":"my-agent","manifest":{"description":"My agent","tags":["demo"]}}
+{"type":"open","to":"sales","payload":"Need Q4 numbers"}
+{"type":"send","session":"<id>","payload":"follow-up"}
+{"type":"resolve","session":"<id>","payload":"done"}
+{"type":"list"}
+{"type":"introspect","handle":"sales"}
+```
+
+**Outbound (stdout):**
+
+```jsonl
+{"type":"registered","handle":"my-agent"}
+{"type":"opened","session":"<id>","message_id":"<id>","trace_id":"<id>"}
+{"type":"message","session":"<id>","from":"sales","payload":"...","message_type":"session_open"}
+{"type":"error","error":"session not found","request_type":"send"}
+```
+
+Rules: `register` must be first. `content_type` defaults to `text/plain`. `trace_id` on `open` is optional (auto-generated). The bridge exits on stdin EOF or SIGINT.
+
+---
+
+## Architecture
+
+```
+proto/tailbus/v1/               Protocol buffer definitions
+  messages.proto                  Envelope, ServiceManifest, CommandSpec
+  agent.proto                     AgentAPI (daemon ↔ agents, Unix socket)
+  coord.proto                     CoordinationAPI (daemon ↔ coord)
+  transport.proto                 NodeTransport (daemon ↔ daemon P2P)
+
+internal/
+  coord/                        Coordination server
+    server.go                     gRPC server, peer map distribution
+    store.go                      SQLite persistence (pure Go, no CGo)
+    oauth.go                      RFC 8628 device auth + OIDC
+
+  daemon/                       Node daemon
+    daemon.go                     Main orchestrator
+    agentserver.go                AgentAPI (Unix socket, handle binding)
+    router.go                     Message routing (local vs remote)
+    acktracker.go                 Delivery ACKs and retry
+    msgstore.go                   bbolt persistence (sessions, messages)
+    metrics.go                    Prometheus + health endpoints
+
+  mcp/                          MCP gateway + web chat UI
+    gateway.go                    HTTP + SSE, handles → MCP tools
+
+  transport/                    P2P data plane
+    grpc.go                       Bidirectional gRPC (mTLS + relay fallback)
+
+  relay/                        NAT traversal (DERP-style)
+    server.go                     Stream mapping and forwarding
+
+  auth/                         OAuth credentials + token refresh
+  identity/                     Ed25519 keypairs, mTLS certificates
+  session/                      Session lifecycle state machine
+```
+
+### Message flow
+
+1. Agent calls `OpenSession` / `SendMessage` / `ResolveSession` via Unix socket
+2. `AgentServer` creates the envelope, records a trace span, passes to `MessageRouter`
+3. Router checks if the destination handle is local or remote:
+   - **Local** → delivers to subscriber channels
+   - **Remote** → resolves handle to peer address, sends via `GRPCTransport` (mTLS)
+4. Transport tries direct P2P first, falls back to relay on failure
+5. Remote daemon receives, delivers to local subscribers, sends ACK back
+6. `AckTracker` removes acknowledged messages; retries unacked (5s timeout, 3 retries)
+7. On restart, pending messages and sessions restore from bbolt
+
+### Protocol
+
+| Layer | Transport | Auth |
+|-------|-----------|------|
+| Agent ↔ Daemon | Unix socket | Token file (mode 0600) |
+| Daemon ↔ Coord | TCP + mTLS | TOFU cert pinning + JWT |
+| Daemon ↔ Daemon | TCP + mTLS | Peer map verification |
+| Daemon ↔ Relay | TCP + mTLS | Peer map verification |
+
+---
+
+## Configuration
+
+All binaries accept TOML config files via `-config`. Example files in `examples/dev/`.
+
+<details>
+<summary><strong>Coordination server (tailbus-coord)</strong></summary>
+
+```toml
+listen_addr = ":8443"
+data_dir = "/tmp/tailbus-coord"
+key_file = "/tmp/tailbus-coord/coord.key"
+# auth_tokens = ["changeme"]
+
+# Embedded relay (NAT traversal without a separate binary)
+# relay_addr = ":7443"
+# relay_advertise_addr = "coord.tailbus.co:7443"
+
+# OAuth (browser-based login)
+oauth_http_addr = ":8080"
+# external_url = "https://coord.tailbus.co"
+# insecure_grpc = false
+# jwt_secret = ""
+
+# [[oauth_providers]]
+# name = "google"
+# issuer = "https://accounts.google.com"
+# client_id = "YOUR_CLIENT_ID.apps.googleusercontent.com"
+# client_secret = "YOUR_CLIENT_SECRET"
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `listen_addr` | `:8443` | gRPC listen address |
+| `data_dir` | `.` | SQLite database directory |
+| `key_file` | `{data_dir}/coord.key` | Keypair for mTLS (auto-generated) |
+| `auth_tokens` | `[]` | Pre-auth tokens for admission control |
+| `oauth_http_addr` | `:8080` | OAuth HTTP listen address |
+| `external_url` | (none) | Public URL for OAuth callbacks |
+| `insecure_grpc` | `false` | Disable gRPC TLS (for edge TLS termination) |
+| `relay_addr` | (none) | Embedded relay listen address |
+| `relay_advertise_addr` | same as `relay_addr` | Address daemons connect to for relay |
+| `jwt_secret` | (auto) | HMAC-SHA256 signing key |
+| `oauth_providers` | `[]` | OIDC providers for login |
+
+</details>
+
+<details>
+<summary><strong>Node daemon (tailbusd)</strong></summary>
+
+```toml
+node_id = "node-1"
+coord_addr = "coord.tailbus.co:8443"
+advertise_addr = "127.0.0.1:9443"
+listen_addr = ":9443"
+socket_path = "/tmp/tailbusd-1.sock"
+key_file = "/tmp/tailbusd-node1.key"
+metrics_addr = ":9090"
+mcp_addr = ":1423"
+# auth_token = "changeme"
+# credential_file = "~/.tailbus/credentials.json"
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `node_id` | hostname | Unique node identifier |
+| `coord_addr` | `coord.tailbus.co:8443` | Coordination server address |
+| `advertise_addr` | (required) | Address other daemons use to reach this node |
+| `listen_addr` | `:9443` | P2P gRPC listen address |
+| `socket_path` | `/tmp/tailbusd.sock` | Unix socket for local agents |
+| `key_file` | `/tmp/tailbusd-{nodeID}.key` | Node keypair (auto-generated) |
+| `metrics_addr` | `:9090` | Prometheus + health + pprof endpoint |
+| `mcp_addr` | (none) | MCP gateway listen address |
+| `auth_token` | (none) | Pre-shared token (skips OAuth) |
+| `credential_file` | `~/.tailbus/credentials.json` | OAuth credential storage |
+
+</details>
+
+<details>
+<summary><strong>Relay server (tailbus-relay)</strong></summary>
+
+```toml
+relay_id = "relay-1"
+coord_addr = "127.0.0.1:8443"
+listen_addr = ":7443"
+key_file = "/tmp/tailbus-relay.key"
+# auth_token = "changeme"
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `relay_id` | `relay-{hostname}` | Unique relay identifier |
+| `coord_addr` | `127.0.0.1:8443` | Coordination server address |
+| `listen_addr` | `:7443` | gRPC listen address |
+| `key_file` | auto | Relay keypair (auto-generated) |
+| `auth_token` | (none) | Auth token for coord admission |
+
+</details>
+
+All config fields can be overridden with command-line flags. Run any binary with `-help`.
+
+---
+
+## Self-Hosting
+
+### Cloud Deployment (Fly.io)
+
+The public coord server runs on Fly.io at `coord.tailbus.co`. To deploy your own:
+
+```bash
+fly apps create my-tailbus-coord
+fly volumes create coord_data --region fra --size 1
+fly secrets set OAUTH_CLIENT_ID=... OAUTH_CLIENT_SECRET=...
+fly deploy --build-target coord
+fly certs add coord.my-domain.com
+```
+
+The repo's `fly.toml` is pre-configured:
+- OAuth HTTP on `:8080` → port 443 (Fly edge TLS)
+- gRPC on `:8443` → port 8443 (TCP passthrough, coord handles mTLS)
+- Relay on `:7443` → port 7443 (TCP passthrough)
+- Persistent volume at `/data` for SQLite + keys
+
+### From Source
+
+```bash
+# Prerequisites: Go 1.25+
+make build          # produces bin/tailbus-coord, bin/tailbusd, bin/tailbus, bin/tailbus-relay
+
+# Start coord
+./bin/tailbus-coord -config examples/dev/coord.toml
+
+# Start daemons (separate terminals)
+./bin/tailbusd -config examples/dev/daemon1.toml
+./bin/tailbusd -config examples/dev/daemon2.toml
+
+# Register agents, exchange messages
+./bin/tailbus -socket /tmp/tailbusd-1.sock register marketing
+./bin/tailbus -socket /tmp/tailbusd-2.sock register sales
+./bin/tailbus -socket /tmp/tailbusd-1.sock open marketing sales "Need Q4 numbers"
+```
+
+---
+
+## Observability
+
+### Prometheus Metrics
+
+```bash
+curl http://localhost:9090/metrics
+```
+
+**Counters:**
+
+| Metric | Description |
+|--------|-------------|
+| `tailbus_messages_routed_total` | Total messages routed |
+| `tailbus_messages_delivered_local_total` | Delivered to local subscribers |
+| `tailbus_messages_sent_remote_total` | Sent to remote peers |
+| `tailbus_sessions_opened_total` | Sessions opened |
+| `tailbus_sessions_resolved_total` | Sessions resolved |
+
+**Histograms:**
+
+| Metric | Description |
+|--------|-------------|
+| `tailbus_message_routing_duration_seconds` | Time to route a message |
+| `tailbus_session_lifetime_seconds` | Session open → resolve duration |
+
+### Distributed Tracing
+
+```bash
+tailbus trace <trace-id>
+
+# Trace 1ee8ae5a-... (6 spans):
+#   15:51:35.345  MESSAGE_CREATED      msg:42c03d06  node:node-1
+#   15:51:35.346  SENT_TO_TRANSPORT    msg:42c03d06  node:node-1
+#   15:51:35.346  ROUTED_REMOTE        msg:42c03d06  node:node-1
+#   ...
+```
+
+### TUI Dashboard
+
+```bash
+tailbus dashboard
+```
+
+Top panel shows mesh topology (ASCII graph or compact list); bottom panels show handles, sessions, and activity. Keyboard: `q` quit, `r` refresh, `c` clear, `Tab` toggle topology/detail view.
+
+### Health Endpoints
+
+```bash
+curl http://localhost:9090/healthz     # {"status":"ok"}
+curl http://localhost:9090/readyz      # {"status":"ready"}
+curl http://localhost:9090/debug/pprof/ # pprof index
+```
+
+---
 
 ## Building External Agents
 
-External agents connect to the local daemon's Unix socket using any gRPC client. The AgentAPI proto defines the full interface:
+Agents connect via Unix socket using gRPC. The full interface:
 
 ```protobuf
 service AgentAPI {
@@ -842,12 +666,11 @@ Example in Go:
 // Read auth token (auto-generated by daemon)
 opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 if token, err := os.ReadFile("/tmp/tailbusd.sock.token"); err == nil {
-    opts = append(opts, grpc.WithPerRPCCredentials(/* Bearer token credentials */))
+    opts = append(opts, grpc.WithPerRPCCredentials(/* Bearer token */))
 }
 conn, _ := grpc.NewClient("unix:///tmp/tailbusd.sock", opts...)
 client := agentpb.NewAgentAPIClient(conn)
 
-// Register with a service manifest
 client.Register(ctx, &agentpb.RegisterRequest{
     Handle: "my-agent",
     Manifest: &messagepb.ServiceManifest{
@@ -856,7 +679,6 @@ client.Register(ctx, &agentpb.RegisterRequest{
     },
 })
 
-// Subscribe to messages
 stream, _ := client.Subscribe(ctx, &agentpb.SubscribeRequest{Handle: "my-agent"})
 for {
     msg, _ := stream.Recv()
@@ -864,45 +686,36 @@ for {
 }
 ```
 
+---
+
 ## Development
 
 ```bash
-# Run all tests (including integration)
-make test-all
+make build          # Build all binaries
+make test           # Unit tests
+make test-all       # All tests including integration
+make proto          # Regenerate protobuf code (requires protoc)
+make clean          # Remove binaries and generated code
+```
 
-# Regenerate proto code after editing .proto files
-make proto
+### Integration tests
 
-# Build all binaries
-make build
+```bash
+go test ./internal/ -v -run TestEndToEnd         # Full P2P session lifecycle
+go test ./internal/ -v -run TestRelayEndToEnd     # Relay fallback delivery
 ```
 
 ### Releasing
 
-Releases are built by [goreleaser](https://goreleaser.com/) via GitHub Actions. To publish a new release:
-
 ```bash
-git tag v0.1.0
+git tag v0.x.0
 git push --tags
 ```
 
-This builds binaries for linux/darwin x amd64/arm64 and publishes them to GitHub Releases. The `install.sh` script automatically picks up the latest release.
+[goreleaser](https://goreleaser.com/) builds binaries for linux/darwin × amd64/arm64 via GitHub Actions and publishes to [Releases](https://github.com/alexanderfrey/tailbus/releases).
 
-To test the build locally:
+---
 
-```bash
-goreleaser build --snapshot --clean
-```
-
-### Running integration tests only
-
-```bash
-go test ./internal/ -v -run TestEndToEnd
-go test ./internal/ -v -run TestRelayEndToEnd
-```
-
-The integration tests spin up full topologies in-process: `TestEndToEnd` verifies the complete session lifecycle with direct P2P (coord + 2 daemons + 2 agents), and `TestRelayEndToEnd` verifies message delivery through the relay when direct P2P is unreachable.
-
-## License
-
-See LICENSE file for details.
+<p align="center">
+  Built with Go. Open source. <a href="https://tailbus.co">tailbus.co</a>
+</p>
