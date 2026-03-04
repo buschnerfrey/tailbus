@@ -6,22 +6,39 @@ build-backend = "hatchling.build"
 name = "tailbus"
 version = "0.1.0"
 description = "Python SDK for tailbus — agent communication mesh"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-keywords = ["agents", "messaging", "tailbus"]
+keywords = ["agents", "messaging", "mesh", "a2a", "mcp", "tailbus"]
+authors = [
+    { name = "Alex Frey", email = "alex@tailbus.co" },
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Networking",
     "Typing :: Typed",
 ]
+
+[project.urls]
+Homepage = "https://tailbus.co"
+Repository = "https://github.com/alexanderfrey/tailbus"
+Documentation = "https://tailbus.co/getting-started"
+Issues = "https://github.com/alexanderfrey/tailbus/issues"
+Changelog = "https://github.com/alexanderfrey/tailbus/releases"
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tailbus"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/tailbus", "README.md", "LICENSE"]
