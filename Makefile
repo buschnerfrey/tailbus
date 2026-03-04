@@ -1,4 +1,4 @@
-.PHONY: proto build test test-all clean
+.PHONY: proto build test test-all lint clean
 
 GOBIN := $(shell go env GOPATH)/bin
 export PATH := $(GOBIN):/opt/homebrew/bin:$(PATH)
@@ -24,6 +24,9 @@ test:
 
 test-all:
 	go test -race ./... -v -count=1
+
+lint:
+	golangci-lint run ./...
 
 clean:
 	rm -rf bin/

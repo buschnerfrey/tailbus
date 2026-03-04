@@ -22,9 +22,13 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - Service manifests, @-mention routing, tracing, Prometheus metrics, TUI dashboard
 
 **What's missing for real adoption:**
+- ~~No LICENSE file, CONTRIBUTING.md, or other open-source governance files~~ ✓ Added
+- ~~No CI on PRs — no automated linting, testing, or coverage reporting~~ ✓ Added
+- ~~Python SDK not published to PyPI~~ ✓ PyPI publish in release pipeline
 - No ACLs — unrestricted any-to-any messaging; need handle-level and tag-based policies
 - Python SDK only; still no TypeScript/native Go SDKs
 - No federation — `name@domain` is parsed but routing is single-coord only
+- CLI missing `--version`, `--json` output, and shell completions
 - ~~No OIDC/SSO identity — nodes authenticate with keypairs, not corporate IdPs~~ ✓ OAuth login with Google OIDC; JWT tokens; device authorization flow
 
 ---
@@ -388,36 +392,93 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 
 ---
 
+## Pillar 11: Community & Developer Adoption
+
+*The technology is strong. The project needs to look and feel community-ready.*
+
+### ~~P11.1 — Open-source governance files~~ ✓ DONE
+- `LICENSE` (MIT), `CONTRIBUTING.md`, `SECURITY.md`
+- `.github/ISSUE_TEMPLATE/` (bug report, feature request), `.github/PULL_REQUEST_TEMPLATE.md`
+
+### ~~P11.2 — CI pipeline~~ ✓ DONE
+- `ci.yml` workflow: `golangci-lint`, `go test -race` with codecov, Python SDK tests — runs on push to main and PRs
+- Dependabot config for Go modules, Python deps, and GitHub Actions
+- `make lint` target
+
+### ~~P11.3 — Publish Python SDK to PyPI~~ ✓ DONE
+- PyPI publish job in `release.yml` using trusted publishing (OIDC)
+- `sdk/python/README.md` with standalone SDK documentation
+
+### P11.4 — CLI polish
+- **Problem:** Missing quality-of-life features developers expect: no `--version`, no machine-readable output, no shell completions.
+- Add `--version` / `tailbus version` command
+- Add `--json` output mode for scripting (machine-readable output for `list`, `sessions`, `status`, `trace`)
+- Add `tailbus completion bash/zsh/fish` for shell completions
+- Add `tailbus doctor` command — diagnose connectivity, check daemon status, verify coord reachability
+- Improve per-subcommand help with flag descriptions
+
+### P11.5 — Install experience
+- **Problem:** No checksum verification (security risk), no uninstall path, no Homebrew formula.
+- Add SHA256 checksum verification to `install.sh` (download checksums from release, verify before installing)
+- Add uninstall support (`tailbus uninstall` or `install.sh --uninstall`)
+- Add version pinning (`install.sh --version v0.5.0`)
+- Add Homebrew formula — `brew install tailbus` is the expected path on macOS
+- Add Windows support notes (WSL instructions or native binary)
+
+### P11.6 — Documentation site
+- **Problem:** README is excellent but there's no deeper documentation. Developers who get past the README need architecture deep-dives, troubleshooting guides, and protocol specs.
+- Create `docs/` directory or documentation site (GitHub Pages, Docusaurus, or similar)
+- Architecture deep-dive — how coord, daemon, transport, and relay interact
+- Troubleshooting guide — common errors, connectivity issues, firewall rules
+- Security model — detailed explanation of mTLS chain, TOFU, JWT flow
+- Protocol specification — formal stdio bridge JSON schema
+- Migration guide for version upgrades
+- Add READMEs to `examples/docker/` and `examples/multi-agent/`
+
+### ~~P11.7 — CHANGELOG and release notes~~ ✓ DONE
+- `CHANGELOG.md` following Keep a Changelog format, backfilled v0.1.0 and v0.2.0
+
+### P11.8 — Docker image publishing
+- **Problem:** Docker images only available via local `docker compose build`. No registry images for production use.
+- Add Docker image build/push to release pipeline (GHCR or Docker Hub)
+- Multi-arch images (amd64, arm64) via `docker buildx`
+- Tags: `latest`, `vX.Y.Z`, `vX.Y`
+
+### P11.9 — Community channels
+- **Problem:** No place for users to ask questions, share builds, or report issues informally.
+- Create Discord server or GitHub Discussions
+- Add community links to README
+- "Built with tailbus" showcase — encourage users to share agent setups
+- Blog / dev log — architecture decisions, use cases, competitive positioning
+
+---
+
 ## Suggested Execution Order
 
-### Now — Trust & Reliability (unblock production usage)
+### ~~Immediate — Community Readiness~~ ✓ DONE
+
+All four items complete: governance files, CI pipeline, PyPI publish, CHANGELOG.
+
+### Now — Developer Experience
 
 | Item | Why | Effort |
 |------|-----|--------|
-| ~~**P3.1 — Relay server**~~ | ✓ Done. NAT traversal works via DERP-style relay. | ~~Large~~ |
-| ~~**P1.4 — Unix socket auth**~~ | ✓ Done. Token-file auth on Unix socket. | ~~Small~~ |
-| ~~**P9.2 — Health endpoints**~~ | ✓ Done. `/healthz`, `/readyz`, pprof on all binaries. | ~~Tiny~~ |
-
-### Next — Reliability & Developer Experience
-
-| Item | Why | Effort |
-|------|-----|--------|
-| ~~**P2.4 — Message persistence**~~ | ✓ Done. bbolt-backed store; sessions and pending messages survive restart. | ~~Large~~ |
-| ~~**P4.1 — Python SDK**~~ | ✓ Done. Async/sync SDK wrapping stdio bridge, zero deps, 46 tests. | ~~Medium~~ |
+| **P11.4 — CLI polish** | Missing --version, --json, completions, doctor. Table stakes for CLI tools. | Medium |
+| **P11.5 — Install experience** | No checksums, no uninstall, no Homebrew. | Small |
+| **P4.2 — TypeScript SDK** | Second most common agent language. Doubles addressable audience. | Medium |
+| **P11.8 — Docker image publishing** | No registry images for production use. | Small |
 | **P2.3 — Backpressure** | Silent message drops are a time bomb. Need explicit signals. | Medium |
-| ~~**P1.5 — Coord admission control**~~ | ✓ Done. Pre-auth token admission on coord. | ~~Small~~ |
 
-### Soon — Platform Features
+### Next — Platform Features & Interoperability
 
 | Item | Why | Effort |
 |------|-----|--------|
-| **P7.1 — Handle-level ACLs** | When >1 team uses the mesh, unrestricted messaging is a non-starter. | Medium |
+| **P5.1 — A2A gateway** | Interop with A2A standard (Linux Foundation, 100+ enterprises). Strategic. | Medium |
 | **P6.2 — Error envelope** | Without structured errors, every failure is silent. | Small |
-| ~~**P5.2 — MCP gateway**~~ | ✓ Done. Handles exposed as MCP tools via HTTP+SSE. | ~~Medium~~ |
-| **P4.2 — TypeScript SDK** | Second most common agent language. | Medium |
 | **P9.1 — OpenTelemetry** | Custom tracing works at small scale; OTel needed for production debugging. | Medium |
-| **P5.1 — A2A gateway** | Interop with the emerging A2A standard. | Medium |
+| **P11.6 — Documentation site** | Deeper docs for architecture, troubleshooting, security model, protocol spec. | Medium |
 | **P3.2 — Direct connection probing** | Relay works but is slower; upgrade to direct when possible. | Medium |
+| **P7.1 — Handle-level ACLs** | When >1 team uses the mesh, unrestricted messaging is a non-starter. | Medium |
 
 ### Later — Enterprise & Scale
 
@@ -426,11 +487,29 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 | **P7.1-P7.2 — ACLs** | Required for multi-team deployments. | Large |
 | **P8.1 — Domain isolation** | Required for multi-tenant SaaS. | Large |
 | **P6.1-P6.3 — Rich semantics** | Multi-party sessions, delegation, error envelopes. | Large |
-| ~~**OIDC/SSO Identity**~~ | ✓ Done. OAuth login with Google OIDC, JWT tokens, device flow. | ~~Large~~ |
 | **P8.2 — Federation** | Massive scope; get single-domain right first. | Very large |
-| ~~**P10.1 — Docker compose**~~ | ✓ Done. Multi-stage Dockerfile + compose with 3 example agents. | ~~Small~~ |
-| ~~**P10.7 — Cloud deployment**~~ | ✓ Done. Fly.io deployment with edge TLS, persistent volume, Google OAuth. | ~~Small~~ |
+| **P11.9 — Community channels** | Discord/Discussions, blog, showcase. Growth lever after core is solid. | Small |
 | **P10.2-P10.4 — Systemd, K8s, Helm** | Important but not differentiating. | Medium |
+
+### Done
+
+| Item | Status |
+|------|--------|
+| ~~P3.1 — Relay server~~ | ✓ NAT traversal via DERP-style relay |
+| ~~P1.1–P1.6 — Security & Auth~~ | ✓ mTLS, Unix socket auth, OAuth/JWT, admission control |
+| ~~P2.1–P2.2 — Delivery guarantees~~ | ✓ Sequence numbers, ACK flow |
+| ~~P2.4 — Message persistence~~ | ✓ bbolt-backed store; survives restart |
+| ~~P4.1 — Python SDK~~ | ✓ Async/sync, zero deps, 46 tests |
+| ~~P5.2 — MCP gateway~~ | ✓ Handles as MCP tools via HTTP+SSE |
+| ~~P9.2 — Health endpoints~~ | ✓ /healthz, /readyz, pprof |
+| ~~P9.5 — Web chat UI~~ | ✓ Embedded dark-theme SPA |
+| ~~P10.1 — Docker compose~~ | ✓ Full mesh + example agents |
+| ~~P10.5–P10.7 — Deployment~~ | ✓ Multi-agent, multi-machine, Fly.io |
+| ~~OIDC/SSO Identity~~ | ✓ OAuth login, Google OIDC, JWT tokens |
+| ~~P11.1 — Governance files~~ | ✓ LICENSE, CONTRIBUTING.md, SECURITY.md, issue/PR templates |
+| ~~P11.2 — CI pipeline~~ | ✓ ci.yml (lint + test-go + test-python), Dependabot, make lint |
+| ~~P11.3 — PyPI publish~~ | ✓ Trusted publishing in release.yml, SDK README |
+| ~~P11.7 — CHANGELOG~~ | ✓ Keep a Changelog format, backfilled v0.1.0 and v0.2.0 |
 
 ---
 
