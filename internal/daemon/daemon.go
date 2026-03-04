@@ -60,6 +60,7 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	// Create transport with mTLS
 	tp := transport.NewGRPCTransport(logger, &cert, verifier)
 	tp.SetResolver(resolver)
+	tp.SetLocalPubKey(kp.Public)
 
 	activity := NewActivityBus()
 	traceStore := NewTraceStore(10000)

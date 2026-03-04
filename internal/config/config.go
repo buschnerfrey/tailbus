@@ -25,8 +25,10 @@ type CoordConfig struct {
 	OAuthProviders []OIDCProvider `toml:"oauth_providers"`
 	JWTSecret      string         `toml:"jwt_secret"`
 	OAuthHTTPAddr  string         `toml:"oauth_http_addr"`
-	ExternalURL    string         `toml:"external_url"`
-	InsecureGRPC   bool           `toml:"insecure_grpc"`
+	ExternalURL       string         `toml:"external_url"`
+	InsecureGRPC      bool           `toml:"insecure_grpc"`
+	RelayAddr         string         `toml:"relay_addr"`          // listen address for embedded relay (e.g. ":7443", empty = disabled)
+	RelayAdvertiseAddr string        `toml:"relay_advertise_addr"` // address daemons connect to (e.g. "coord.tailbus.co:7443")
 }
 
 // DaemonConfig is the configuration for a node daemon.

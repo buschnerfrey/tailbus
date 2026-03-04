@@ -7,23 +7,19 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 ```
                        +-----------------+
                        |  tailbus-coord  |
-                       |  (discovery)    |
+                       |  (discovery +   |
+                       |   relay)        |
                        +--------+--------+
-                          peer map
-                       /    updates     \
+                        peer map | relay
+                       /  updates|      \
               +--------+--------+  +--------+--------+
               |    tailbusd     |  |    tailbusd     |
               |    (node-1)     |  |    (node-2)     |
               |  P2P gRPC <----|--|----> P2P gRPC   |
               +--------+--------+  +--------+--------+
                  |  Unix socket     Unix socket  |
-                /     \      \      /     \       \
-           agent-a   agent-b  \    /  agent-c   agent-d
-                               +--+
-                          +--------+--------+
-                          | tailbus-relay   |
-                          | (NAT fallback)  |
-                          +-----------------+
+                /     \                /     \
+           agent-a   agent-b    agent-c   agent-d
 ```
 
 ## Features
@@ -36,7 +32,7 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **Distributed message tracing** — every session gets a `trace_id`; spans are recorded at each hop (created, routed, sent, received, delivered)
 - **Prometheus metrics** — counter and histogram metrics exported at `/metrics` for external monitoring
 - **Real-time TUI dashboard** — terminal dashboard showing handles, peers, sessions, and live activity
-- **DERP-style relay** — when peers can't reach each other directly (NAT, firewalls, different VPCs), messages are transparently forwarded through a relay server; daemons try direct P2P first and fall back automatically
+- **DERP-style relay** — when peers can't reach each other directly (NAT, firewalls, different VPCs), messages are transparently forwarded through a relay server; daemons try direct P2P first and fall back automatically; relay is embedded in the coord server by default — every deployment gets NAT traversal for free
 - **mTLS everywhere** — all P2P, relay, and daemon-to-coord connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
 - **Per-connection handle binding** — each gRPC connection owns its registered handles; RPCs enforce `from_handle` ownership; handles auto-cleanup on disconnect
 - **Unix socket token auth** — daemon generates a random auth token file (mode 0600) on startup; CLI and agents present it automatically via gRPC per-RPC credentials; prevents co-tenant handle impersonation
@@ -47,7 +43,7 @@ Think of it as **Slack for autonomous agents** — agents register handles, open
 - **Web chat UI** — browser-based chat interface embedded in the daemon binary via `go:embed`; select agents, send messages, view responses in real time at the MCP gateway address
 - **OAuth login flow** — device authorization grant (RFC 8628) for browser-based login; `tailbusd` starts → opens browser → login with Google → machine joins mesh; JWT access tokens (1h) with automatic refresh (30d); credentials persisted at `~/.tailbus/credentials.json`
 - **Coord admission control** — pre-auth token system (like `tailscale up --authkey`) gates which nodes can join the mesh; OAuth login works alongside pre-shared tokens; open mode (no tokens configured) preserves zero-config default
-- **Cloud deployment** — `tailbus-coord` runs on Fly.io at `coord.tailbus.co` with persistent volume for SQLite, edge TLS for OAuth (port 443), TCP passthrough for gRPC (port 8443), and Google OAuth; any machine can join with `tailbus login && tailbusd`
+- **Cloud deployment** — `tailbus-coord` runs on Fly.io at `coord.tailbus.co` with persistent volume for SQLite, edge TLS for OAuth (port 443), TCP passthrough for gRPC (port 8443), embedded relay (port 7443), and Google OAuth; any machine can join with `tailbus login && tailbusd`
 - **Health & readiness endpoints** — `/healthz`, `/readyz`, and `/debug/pprof/*` on daemon metrics port (alongside `/metrics`), coord, and relay servers
 - **Docker Compose** — `docker compose up` for a full mesh with coord + 2 daemons + MCP gateway + example agents in 30 seconds
 
@@ -179,6 +175,7 @@ fly certs add coord.my-domain.com
 The `fly.toml` and `deploy/coord.toml` in the repo are pre-configured:
 - OAuth HTTP on internal `:8080` → public port 443 via Fly edge TLS
 - gRPC on `:8443` → public port 8443 via TCP passthrough (coord handles mTLS)
+- Embedded relay on `:7443` → public port 7443 via TCP passthrough (NAT traversal for all users)
 - Health check on `:8081`
 - Persistent volume at `/data` for SQLite + keys
 - OAuth client ID/secret read from env vars (`OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`)
@@ -218,21 +215,28 @@ Or using flags directly:
   -socket /tmp/tailbusd-1.sock
 ```
 
-### (Optional) Start a relay server
+### (Optional) Enable the embedded relay
 
-If daemons are behind NAT or can't reach each other directly, start a relay:
+The coord server can embed a relay for NAT traversal — no separate binary needed:
+
+```bash
+./bin/tailbus-coord -listen :8443 -data-dir /tmp/tailbus-coord -relay-addr :7443
+```
+
+Or in `coord.toml`:
+
+```toml
+relay_addr = ":7443"
+relay_advertise_addr = "my-coord-host:7443"  # what daemons connect to
+```
+
+The embedded relay registers itself in the peer map automatically. Daemons discover it and fall back to it when direct P2P connections fail.
+
+You can still run a standalone relay if preferred:
 
 ```bash
 ./bin/tailbus-relay -listen :7443 -coord 127.0.0.1:8443
 ```
-
-Or with a config file:
-
-```bash
-./bin/tailbus-relay -config examples/dev/relay.toml
-```
-
-The relay registers with the coord server and appears in the peer map. Daemons discover it automatically and fall back to it when direct P2P connections fail.
 
 ### 3. Register agents and exchange messages
 
@@ -318,6 +322,10 @@ data_dir = "/tmp/tailbus-coord"
 key_file = "/tmp/tailbus-coord/coord.key"
 # auth_tokens = ["changeme"]
 
+# Embedded relay (NAT traversal without a separate relay binary)
+# relay_addr = ":7443"
+# relay_advertise_addr = "coord.tailbus.co:7443"
+
 # OAuth configuration (enables browser-based login)
 oauth_http_addr = ":8080"
 # external_url = "https://coord.tailbus.co"  # set when behind edge TLS (e.g. Fly.io)
@@ -340,6 +348,8 @@ oauth_http_addr = ":8080"
 | `oauth_http_addr` | `:8080` | HTTP listen address for OAuth endpoints (device flow + callback) |
 | `external_url` | (none) | Public base URL for OAuth callbacks (e.g. `https://coord.tailbus.co`); if unset, defaults to `http://localhost:{oauth_http_addr}` |
 | `insecure_grpc` | `false` | Disable gRPC server TLS (use when edge TLS terminates it, e.g. Fly.io HTTP handler) |
+| `relay_addr` | (none) | Listen address for embedded relay (e.g. `:7443`); empty = relay disabled |
+| `relay_advertise_addr` | same as `relay_addr` | Address daemons connect to for relay (e.g. `coord.tailbus.co:7443`) |
 | `jwt_secret` | (auto) | HMAC-SHA256 signing key for JWTs; auto-generated at `{data_dir}/jwt.key` if empty |
 | `oauth_providers` | `[]` | OIDC providers for browser login (see example above) |
 
@@ -608,6 +618,7 @@ internal/
 
   relay/                    NAT traversal relay
     server.go                 DERP-style relay: Exchange handler, stream mapping, forwarding
+                              Supports both mTLS (cert-based) and insecure (metadata-based) peer identification
 
   handle/                   Handle resolution
   session/                  Session lifecycle state machine (with sequence counters)

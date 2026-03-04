@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 // GRPCTransport implements Transport using gRPC bidirectional streams.
@@ -35,6 +37,7 @@ type GRPCTransport struct {
 	peers map[string]*peerConn // addr -> peer connection
 	ctx   context.Context      // daemon lifetime context
 
+	localPubKey []byte                     // local node's public key (for relay metadata)
 	resolver    *handle.Resolver           // for relay addr lookup + pubkey reverse-lookup
 	relayMu     sync.Mutex
 	relayConns  map[string]*peerConn       // relay addr → connection
@@ -112,6 +115,12 @@ func (t *GRPCTransport) OnSend(fn func(*messagepb.Envelope)) {
 // SetResolver sets the resolver used for relay address and pubkey lookup.
 func (t *GRPCTransport) SetResolver(r *handle.Resolver) {
 	t.resolver = r
+}
+
+// SetLocalPubKey sets the local node's public key, sent as gRPC metadata
+// when connecting to relay servers for identification in insecure mode.
+func (t *GRPCTransport) SetLocalPubKey(key []byte) {
+	t.localPubKey = key
 }
 
 const directFailTTL = 60 * time.Second
@@ -291,7 +300,15 @@ func (t *GRPCTransport) connectRelay(addr string) (*peerConn, error) {
 	}
 
 	client := transportpb.NewNodeTransportClient(conn)
-	stream, err := client.Exchange(t.ctx)
+
+	// Attach local pubkey as metadata so the relay can identify us in insecure mode
+	streamCtx := t.ctx
+	if len(t.localPubKey) > 0 {
+		md := metadata.Pairs("x-tailbus-pubkey", hex.EncodeToString(t.localPubKey))
+		streamCtx = metadata.NewOutgoingContext(t.ctx, md)
+	}
+
+	stream, err := client.Exchange(streamCtx)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("open exchange stream to relay %s: %w", addr, err)

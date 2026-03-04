@@ -2,13 +2,13 @@
 
 ## Where we are today
 
-Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands. **Cloud deployment:** `tailbus-coord` on Fly.io at `coord.tailbus.co`; any machine can join with `tailbus login && tailbusd`.
+Working MVP with real security, NAT traversal, persistence, and MCP integration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands. **Cloud deployment:** `tailbus-coord` on Fly.io at `coord.tailbus.co` with embedded relay on port 7443; any machine can join with `tailbus login && tailbusd` and gets NAT traversal for free.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
 - All daemon-to-daemon traffic is mTLS with Ed25519 peer verification against the peer map
 - All daemon-to-coord traffic is mTLS with TOFU cert pinning
-- DERP-style relay server for NAT traversal — daemons try direct P2P first, fall back to relay transparently
+- DERP-style relay server for NAT traversal — daemons try direct P2P first, fall back to relay transparently; relay embedded in coord server by default (also works standalone)
 - Handle ownership is enforced per Unix socket connection (no impersonation)
 - Unix socket token auth — daemon generates a random token file (mode 0600); CLI and agents present it automatically
 - Coord admission control — pre-auth token system gates node registration; open mode (no tokens) preserves zero-config default
@@ -131,6 +131,8 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 - `GRPCTransport.Send()` tries direct P2P first, falls back to relay on failure; failed direct addrs cached 60s
 - Daemons proactively connect to all known relays (via `ConnectToRelays`) so they can receive forwarded messages
 - Trust chain: `Daemon A ↔ mTLS ↔ Relay ↔ mTLS ↔ Daemon B` — each hop authenticated via `ResolverVerifier`
+- **Embedded in coord:** relay can be started inside `tailbus-coord` via `relay_addr` config — no separate binary needed; relay registers itself in the store with heartbeat to avoid reaper eviction
+- **Insecure mode support:** relay reads peer pubkey from `x-tailbus-pubkey` gRPC metadata header (hex-encoded), falling back to mTLS cert extraction; daemons send pubkey metadata on relay connect; enables relay behind edge TLS (e.g. Fly.io with `insecure_grpc=true`)
 
 ### P3.2 — Direct connection probing + upgrade
 - On peer map update, attempt direct TCP to new peer
@@ -359,7 +361,7 @@ Working MVP with real security, NAT traversal, persistence, and MCP integration:
 ### ~~P10.7 — Cloud deployment (Fly.io)~~ ✓ DONE
 - `tailbus-coord` deployed to Fly.io at `coord.tailbus.co` (Frankfurt region)
 - `fly.toml` + `deploy/coord.toml` for one-command deployment
-- OAuth HTTP on port 443 via Fly edge TLS; gRPC on port 8443 via TCP passthrough
+- OAuth HTTP on port 443 via Fly edge TLS; gRPC on port 8443 via TCP passthrough; embedded relay on port 7443
 - Persistent Fly Volume at `/data` for SQLite + keys
 - Google OAuth credentials via `fly secrets set` (env var overrides: `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`)
 - Health check on `:8081` (separate from OAuth HTTP on `:8080`)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -14,10 +15,13 @@ import (
 	"syscall"
 	"time"
 
+	"encoding/hex"
+
 	"github.com/alexanderfrey/tailbus/internal/config"
 	"github.com/alexanderfrey/tailbus/internal/coord"
 	"github.com/alexanderfrey/tailbus/internal/health"
 	"github.com/alexanderfrey/tailbus/internal/identity"
+	"github.com/alexanderfrey/tailbus/internal/relay"
 )
 
 func main() {
@@ -192,12 +196,82 @@ func main() {
 		}()
 	}
 
+	// Start embedded relay if configured
+	var relaySrv *relay.Server
+	if cfg.RelayAddr != "" {
+		var relayCert *tls.Certificate
+		if kp != nil {
+			c, err := identity.SelfSignedCert(kp)
+			if err != nil {
+				logger.Error("failed to generate relay TLS cert", "error", err)
+				os.Exit(1)
+			}
+			relayCert = &c
+		}
+
+		relaySrv = relay.NewServer(logger.With("component", "relay"), relayCert, nil)
+
+		relayLis, err := net.Listen("tcp", cfg.RelayAddr)
+		if err != nil {
+			logger.Error("failed to listen for relay", "addr", cfg.RelayAddr, "error", err)
+			os.Exit(1)
+		}
+
+		// Register relay node in the store so daemons discover it via peer map
+		advertiseAddr := cfg.RelayAdvertiseAddr
+		if advertiseAddr == "" {
+			advertiseAddr = cfg.RelayAddr
+		}
+
+		relayNodeID := "embedded-relay"
+		var relayPubKey []byte
+		if kp != nil {
+			relayPubKey = kp.Public
+		}
+		if err := store.UpsertNode(&coord.NodeRecord{
+			NodeID:        relayNodeID,
+			PublicKey:     relayPubKey,
+			AdvertiseAddr: advertiseAddr,
+			IsRelay:       true,
+			LastHeartbeat: time.Now(),
+		}); err != nil {
+			logger.Error("failed to register embedded relay", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("embedded relay registered", "addr", advertiseAddr, "pubkey", hex.EncodeToString(relayPubKey))
+
+		// Heartbeat goroutine to keep relay alive (reaper TTL = 90s, beat every 30s)
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := store.UpdateHeartbeat(relayNodeID, nil, nil); err != nil {
+						logger.Warn("relay heartbeat failed", "error", err)
+					}
+				}
+			}
+		}()
+
+		go func() {
+			if err := relaySrv.Serve(relayLis); err != nil {
+				logger.Error("relay server error", "error", err)
+			}
+		}()
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
 		logger.Info("shutting down")
 		cancel()
+		if relaySrv != nil {
+			relaySrv.GracefulStop()
+		}
 		srv.GracefulStop()
 	}()
 

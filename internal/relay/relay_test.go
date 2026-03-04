@@ -15,6 +15,8 @@ import (
 	"github.com/alexanderfrey/tailbus/internal/identity"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 // noopVerifier allows all peers (for testing without full peer map).
@@ -163,6 +165,64 @@ func TestRelayTargetNotConnected(t *testing.T) {
 	t.Log("Relay target-not-connected test passed (no crash)")
 }
 
+func TestRelayInsecureMetadata(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	// Create relay server with NO TLS (insecure mode)
+	srv := NewServer(logger, nil, nil)
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(lis)
+	defer srv.Stop()
+
+	relayAddr := lis.Addr().String()
+
+	// Generate two keypairs (used only for identification, not TLS)
+	kpA, _ := identity.Generate()
+	kpB, _ := identity.Generate()
+
+	// Connect both via insecure gRPC with pubkey in metadata
+	streamA := dialRelayInsecure(t, relayAddr, kpA.Public)
+	streamB := dialRelayInsecure(t, relayAddr, kpB.Public)
+
+	time.Sleep(100 * time.Millisecond)
+
+	if srv.ConnectedPeers() != 2 {
+		t.Fatalf("expected 2 connected peers, got %d", srv.ConnectedPeers())
+	}
+
+	// A sends to B via relay
+	env := &messagepb.Envelope{
+		MessageId:      "insecure-msg-1",
+		SessionId:      "sess-1",
+		FromHandle:     "alice",
+		ToHandle:       "bob",
+		Payload:        []byte("hello insecure relay"),
+		Type:           messagepb.EnvelopeType_ENVELOPE_TYPE_MESSAGE,
+		RelayTargetKey: kpB.Public,
+	}
+
+	if err := streamA.Send(env); err != nil {
+		t.Fatalf("A send: %v", err)
+	}
+
+	received, err := streamB.Recv()
+	if err != nil {
+		t.Fatalf("B recv: %v", err)
+	}
+
+	if received.MessageId != "insecure-msg-1" {
+		t.Errorf("message_id = %q, want insecure-msg-1", received.MessageId)
+	}
+	if string(received.Payload) != "hello insecure relay" {
+		t.Errorf("payload = %q", string(received.Payload))
+	}
+
+	t.Log("Relay insecure metadata test passed")
+}
+
 func dialRelay(t *testing.T, addr string, cert tls.Certificate) transportpb.NodeTransport_ExchangeClient {
 	t.Helper()
 
@@ -181,6 +241,28 @@ func dialRelay(t *testing.T, addr string, cert tls.Certificate) transportpb.Node
 	stream, err := client.Exchange(context.Background())
 	if err != nil {
 		t.Fatalf("open exchange: %v", err)
+	}
+	return stream
+}
+
+func dialRelayInsecure(t *testing.T, addr string, pubKey []byte) transportpb.NodeTransport_ExchangeClient {
+	t.Helper()
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial relay insecure: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client := transportpb.NewNodeTransportClient(conn)
+
+	// Attach pubkey as metadata
+	md := metadata.Pairs("x-tailbus-pubkey", hex.EncodeToString(pubKey))
+	ctx := metadata.NewOutgoingContext(context.Background(), md)
+
+	stream, err := client.Exchange(ctx)
+	if err != nil {
+		t.Fatalf("open exchange insecure: %v", err)
 	}
 	return stream
 }

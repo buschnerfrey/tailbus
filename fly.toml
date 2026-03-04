@@ -25,6 +25,12 @@ primary_region = "fra"
   [[services.ports]]
     port = 8443
 
+[[services]]
+  internal_port = 7443
+  protocol = "tcp"
+  [[services.ports]]
+    port = 7443
+
 [checks]
   [checks.health]
     port = 8081

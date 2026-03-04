@@ -14,6 +14,7 @@ import (
 	"github.com/alexanderfrey/tailbus/internal/transport"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 )
 
@@ -67,27 +68,13 @@ func NewServer(logger *slog.Logger, cert *tls.Certificate, verifier transport.Pe
 }
 
 // Exchange handles bidirectional streams from daemons.
-// It extracts the peer's pubkey from the mTLS cert, registers the stream,
-// and forwards envelopes to the target peer based on relay_target_key.
+// It extracts the peer's pubkey from gRPC metadata (x-tailbus-pubkey header)
+// or falls back to the mTLS cert. Metadata-based identification enables
+// insecure mode (e.g. when edge TLS terminates before the relay).
 func (s *Server) Exchange(stream transportpb.NodeTransport_ExchangeServer) error {
-	// Extract peer pubkey from TLS context
-	p, ok := peer.FromContext(stream.Context())
-	if !ok {
-		return fmt.Errorf("no peer info in context")
-	}
-
-	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
-	if !ok {
-		return fmt.Errorf("no TLS info in peer context")
-	}
-
-	if len(tlsInfo.State.PeerCertificates) == 0 {
-		return fmt.Errorf("no peer certificates")
-	}
-
-	pubKey, err := identity.PubKeyFromCert(tlsInfo.State.PeerCertificates[0].Raw)
+	pubKey, err := s.extractPubKey(stream)
 	if err != nil {
-		return fmt.Errorf("extract peer pubkey: %w", err)
+		return fmt.Errorf("identify peer: %w", err)
 	}
 
 	keyHex := hex.EncodeToString(pubKey)
@@ -151,6 +138,39 @@ func (s *Server) Exchange(stream transportpb.NodeTransport_ExchangeServer) error
 				"from", keyHex[:16]+"...", "target", targetHex[:16]+"...", "msg_id", env.MessageId)
 		}
 	}
+}
+
+// extractPubKey extracts the connecting peer's public key.
+// It first checks gRPC metadata for the x-tailbus-pubkey header (hex-encoded),
+// then falls back to extracting from the mTLS certificate.
+func (s *Server) extractPubKey(stream transportpb.NodeTransport_ExchangeServer) ([]byte, error) {
+	// Try gRPC metadata first (works in both insecure and mTLS modes)
+	if md, ok := metadata.FromIncomingContext(stream.Context()); ok {
+		if vals := md.Get("x-tailbus-pubkey"); len(vals) > 0 {
+			pubKey, err := hex.DecodeString(vals[0])
+			if err != nil {
+				return nil, fmt.Errorf("decode x-tailbus-pubkey metadata: %w", err)
+			}
+			return pubKey, nil
+		}
+	}
+
+	// Fall back to TLS certificate
+	p, ok := peer.FromContext(stream.Context())
+	if !ok {
+		return nil, fmt.Errorf("no peer info and no x-tailbus-pubkey metadata")
+	}
+
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok {
+		return nil, fmt.Errorf("no TLS info and no x-tailbus-pubkey metadata")
+	}
+
+	if len(tlsInfo.State.PeerCertificates) == 0 {
+		return nil, fmt.Errorf("no peer certificates and no x-tailbus-pubkey metadata")
+	}
+
+	return identity.PubKeyFromCert(tlsInfo.State.PeerCertificates[0].Raw)
 }
 
 // Serve starts the relay gRPC server on the given listener.
