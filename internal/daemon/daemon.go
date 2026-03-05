@@ -160,6 +160,7 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 		}
 		agentSrv.DeliverToLocal(env)
 		activity.MessagesReceivedRemote.Add(1)
+		activity.EmitMessageRouted(env.SessionId, env.FromHandle, env.ToHandle, false, env.TraceId, env.MessageId)
 	})
 
 	return d, nil

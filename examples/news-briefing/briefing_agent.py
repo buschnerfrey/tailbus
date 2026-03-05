@@ -61,6 +61,10 @@ pending: dict[str, asyncio.Future] = {}
 @agent.on_message
 async def handle(msg: Message):
     """Handle responses from delegated agents, or trigger a new briefing."""
+    # Ignore our own resolve messages (prevents infinite loop when fire session resolves)
+    if msg.message_type == "session_resolve":
+        return
+
     # Response from a delegated session?
     if msg.session in pending:
         fut = pending.pop(msg.session)

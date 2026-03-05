@@ -530,6 +530,7 @@ func (m dashboardModel) renderTopologyCompact(nodes []topoNode, width int) strin
 
 	for _, n := range nodes {
 		var icon, label, suffix string
+		activeH := m.activeHandlesFor(n)
 
 		if n.isRelay {
 			if n.connected {
@@ -547,7 +548,7 @@ func (m dashboardModel) renderTopologyCompact(nodes []topoNode, width int) strin
 			icon = localNodeStyle.Render("\u25cf")
 			label = localNodeStyle.Render(n.id) + helpStyle.Render(" (this node)")
 			if len(n.handles) > 0 {
-				suffix = ": " + strings.Join(n.handles, ", ")
+				suffix = ": " + renderHandleList(n.handles, activeH)
 			}
 		} else {
 			switch n.connectivity {
@@ -565,7 +566,7 @@ func (m dashboardModel) renderTopologyCompact(nodes []topoNode, width int) strin
 				suffix = " " + helpStyle.Render("[offline]")
 			}
 			if len(n.handles) > 0 {
-				suffix += ": " + strings.Join(n.handles, ", ")
+				suffix += ": " + renderHandleList(n.handles, activeH)
 			}
 		}
 
@@ -610,7 +611,8 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 
 	// Build local node box
 	localActive := m.isNodeActive(local)
-	localBox := renderNodeBox(local, true, localActive)
+	localActiveHandles := m.activeHandlesFor(local)
+	localBox := renderNodeBox(local, true, localActive, localActiveHandles)
 
 	if len(remotes) == 0 {
 		b.WriteString(localBox)
@@ -638,7 +640,8 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 	// Render each remote with edge from local
 	for i, remote := range remotes {
 		remoteActive := m.isNodeActive(remote)
-		remoteBox := renderNodeBox(remote, false, remoteActive)
+		remoteActiveHandles := m.activeHandlesFor(remote)
+		remoteBox := renderNodeBox(remote, false, remoteActive, remoteActiveHandles)
 		flashing := m.hasFlashBetween(local, remote)
 		edge := renderEdge(remote, maxLocalW, flashing, m.animFrame)
 
@@ -706,8 +709,37 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// renderHandleList renders a comma-separated handle list, highlighting active ones.
+func renderHandleList(handles []string, active map[string]bool) string {
+	parts := make([]string, len(handles))
+	for i, h := range handles {
+		if active[h] {
+			parts[i] = flashNodeStyle.Render(h)
+		} else {
+			parts[i] = h
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// activeHandlesFor returns the set of handles on a node that are destinations
+// of active flashes (i.e. currently receiving messages).
+func (m dashboardModel) activeHandlesFor(n topoNode) map[string]bool {
+	result := make(map[string]bool)
+	handles := make(map[string]bool, len(n.handles))
+	for _, h := range n.handles {
+		handles[h] = true
+	}
+	for _, f := range m.flashes {
+		if handles[f.toHandle] {
+			result[f.toHandle] = true
+		}
+	}
+	return result
+}
+
 // renderNodeBox renders an ASCII box for a topology node.
-func renderNodeBox(n topoNode, isLocal bool, active bool) string {
+func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[string]bool) string {
 	// Determine box width
 	nameLen := len(n.id)
 	maxContent := nameLen + 4 // icon + space + name + padding
@@ -790,7 +822,11 @@ func renderNodeBox(n topoNode, isLocal bool, active bool) string {
 		if padR < 0 {
 			padR = 0
 		}
-		b.WriteString("  " + borderStyle.Render("|") + " " + helpStyle.Render(hName) + strings.Repeat(" ", padR) + borderStyle.Render("|") + "\n")
+		hStyle := helpStyle
+		if activeHandles[h] {
+			hStyle = flashNodeStyle
+		}
+		b.WriteString("  " + borderStyle.Render("|") + " " + hStyle.Render(hName) + strings.Repeat(" ", padR) + borderStyle.Render("|") + "\n")
 	}
 
 	// Bottom border
