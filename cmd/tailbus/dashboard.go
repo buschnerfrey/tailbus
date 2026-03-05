@@ -1008,14 +1008,19 @@ func (m dashboardModel) View() string {
 	b.WriteString(sectionStyle.Width(totalWidth - 4).Render(topContent) + "\n")
 
 	// Bottom row: handles+sessions (left) | activity (right)
+	// Constrain bottom height so topology stays visible
+	bottomHeight := m.height/2 - 2
+	if bottomHeight < 6 {
+		bottomHeight = 6
+	}
 	leftW := totalWidth/2 - 2
 	rightW := totalWidth - leftW - 4
 
-	hsContent := m.renderHandlesSessions(leftW)
-	actContent := m.renderActivity(rightW)
+	hsContent := m.renderHandlesSessions(leftW, bottomHeight-2)
+	actContent := m.renderActivity(rightW, bottomHeight-2)
 	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top,
-		sectionStyle.Width(leftW).Render(hsContent),
-		sectionStyle.Width(rightW).Render(actContent),
+		sectionStyle.Width(leftW).MaxHeight(bottomHeight).Render(hsContent),
+		sectionStyle.Width(rightW).MaxHeight(bottomHeight).Render(actContent),
 	)
 	b.WriteString(bottomRow + "\n")
 
@@ -1032,15 +1037,21 @@ func (m dashboardModel) View() string {
 }
 
 // renderHandlesSessions renders both handles and sessions in one merged panel.
-func (m dashboardModel) renderHandlesSessions(width int) string {
+func (m dashboardModel) renderHandlesSessions(width, maxLines int) string {
 	var b strings.Builder
+	lines := 0
 
 	// Handles
 	b.WriteString(headerStyle.Render("HANDLES") + "\n")
+	lines++
 	if m.status == nil || len(m.status.Handles) == 0 {
 		b.WriteString(helpStyle.Render("  (none)") + "\n")
+		lines++
 	} else {
 		for _, h := range m.status.Handles {
+			if lines >= maxLines-2 {
+				break
+			}
 			line := fmt.Sprintf("  %s (%d subs) \u2193%d \u2191%d",
 				h.Name, h.SubscriberCount, h.MessagesIn, h.MessagesOut)
 			if h.QueueDepth > 0 {
@@ -1058,15 +1069,23 @@ func (m dashboardModel) renderHandlesSessions(width int) string {
 				line = line[:width-2]
 			}
 			b.WriteString(line + "\n")
+			lines++
 		}
 	}
 
 	// Sessions
+	remaining := maxLines - lines
 	b.WriteString(headerStyle.Render("SESSIONS") + "\n")
+	lines++
+	remaining--
 	if m.status == nil || len(m.status.Sessions) == 0 {
 		b.WriteString(helpStyle.Render("  (none)"))
 	} else {
+		shown := 0
 		for _, s := range m.status.Sessions {
+			if shown >= remaining {
+				break
+			}
 			idShort := s.SessionId
 			if len(idShort) > 8 {
 				idShort = idShort[:8]
@@ -1080,12 +1099,13 @@ func (m dashboardModel) renderHandlesSessions(width int) string {
 				line = line[:width-2]
 			}
 			b.WriteString(line + "\n")
+			shown++
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (m dashboardModel) renderActivity(width int) string {
+func (m dashboardModel) renderActivity(width, maxLines int) string {
 	var b strings.Builder
 	b.WriteString(headerStyle.Render("ACTIVITY") + "\n")
 
@@ -1094,11 +1114,14 @@ func (m dashboardModel) renderActivity(width int) string {
 		return b.String()
 	}
 
-	// Show most recent events (bottom = newest)
-	maxLines := 10
+	// Show most recent events (bottom = newest), capped to available height
+	showLines := maxLines - 1 // subtract header
+	if showLines < 1 {
+		showLines = 1
+	}
 	start := 0
-	if len(m.activity) > maxLines {
-		start = len(m.activity) - maxLines
+	if len(m.activity) > showLines {
+		start = len(m.activity) - showLines
 	}
 
 	for _, entry := range m.activity[start:] {
