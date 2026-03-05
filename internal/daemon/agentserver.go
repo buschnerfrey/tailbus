@@ -322,6 +322,14 @@ func (s *AgentServer) GracefulStop() {
 	}
 }
 
+// ForceStop immediately stops the gRPC server without waiting for streams.
+func (s *AgentServer) ForceStop() {
+	s.grpc.Stop()
+	if s.tokenPath != "" {
+		os.Remove(s.tokenPath)
+	}
+}
+
 // GetHandles returns the list of currently registered handles.
 func (s *AgentServer) GetHandles() []string {
 	s.mu.RLock()

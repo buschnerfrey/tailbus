@@ -333,8 +333,19 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 	}
 }
 
-// hasFlashBetween checks if there's an active flash between two nodes (by handle overlap).
-func (m dashboardModel) hasFlashBetween(a, b topoNode) bool {
+// flashDirection represents the direction of message flow between two nodes.
+type flashDirection int
+
+const (
+	flashNone    flashDirection = 0
+	flashAtoB    flashDirection = 1 // local → remote
+	flashBtoA    flashDirection = 2 // remote → local
+	flashBothDir flashDirection = 3 // both directions
+)
+
+// flashDirBetween returns the direction(s) of active flashes between two nodes.
+// a is the local node (left), b is the remote node (right).
+func (m dashboardModel) flashDirBetween(a, b topoNode) flashDirection {
 	aHandles := make(map[string]bool, len(a.handles))
 	for _, h := range a.handles {
 		aHandles[h] = true
@@ -343,13 +354,16 @@ func (m dashboardModel) hasFlashBetween(a, b topoNode) bool {
 	for _, h := range b.handles {
 		bHandles[h] = true
 	}
+	dir := flashNone
 	for _, f := range m.flashes {
-		if (aHandles[f.fromHandle] && bHandles[f.toHandle]) ||
-			(bHandles[f.fromHandle] && aHandles[f.toHandle]) {
-			return true
+		if aHandles[f.fromHandle] && bHandles[f.toHandle] {
+			dir |= flashAtoB
+		}
+		if bHandles[f.fromHandle] && aHandles[f.toHandle] {
+			dir |= flashBtoA
 		}
 	}
-	return false
+	return dir
 }
 
 // isNodeActive checks if a node is the destination of any active flash.
@@ -642,8 +656,8 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 		remoteActive := m.isNodeActive(remote)
 		remoteActiveHandles := m.activeHandlesFor(remote)
 		remoteBox := renderNodeBox(remote, false, remoteActive, remoteActiveHandles)
-		flashing := m.hasFlashBetween(local, remote)
-		edge := renderEdge(remote, maxLocalW, flashing, m.animFrame)
+		flashDir := m.flashDirBetween(local, remote)
+		edge := renderEdge(remote, maxLocalW, flashDir, m.animFrame)
 
 		if i > 0 {
 			b.WriteString("\n")
@@ -836,18 +850,39 @@ func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[stri
 }
 
 // renderEdge renders the connection line between local and a remote node.
-func renderEdge(remote topoNode, localWidth int, flashing bool, animFrame int) string {
+func renderEdge(remote topoNode, localWidth int, flashDir flashDirection, animFrame int) string {
 	_ = localWidth
 	edgeW := 14
 
 	var edgeLine string
-	if flashing {
-		// Animated arrow pattern that shifts each frame
-		patterns := []string{
+	if flashDir != flashNone {
+		// Direction-aware animated arrows
+		outPatterns := []string{
 			"──►─►─►──",
 			"───►─►─►─",
 			"────►─►─►",
 			"►────►─►─",
+		}
+		inPatterns := []string{
+			"──◄─◄─◄──",
+			"─◄─◄─◄───",
+			"◄─◄─◄────",
+			"─◄─◄────◄",
+		}
+		bothPatterns := []string{
+			"◄─►──◄─►─",
+			"─◄─►──◄─►",
+			"►─◄─►──◄─",
+			"─►─◄─►──◄",
+		}
+		var patterns []string
+		switch flashDir {
+		case flashBtoA:
+			patterns = inPatterns
+		case flashBothDir:
+			patterns = bothPatterns
+		default:
+			patterns = outPatterns
 		}
 		edgeLine = flashEdgeStyle.Render(patterns[animFrame%len(patterns)])
 	} else if remote.isRelay {

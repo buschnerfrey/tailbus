@@ -435,7 +435,21 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	<-innerCtx.Done()
 	d.logger.Info("daemon shutting down")
-	d.agentServer.GracefulStop()
+
+	// GracefulStop can hang if streaming RPCs (Subscribe, WatchActivity) are open.
+	// Give it a short deadline, then force stop.
+	stopped := make(chan struct{})
+	go func() {
+		d.agentServer.GracefulStop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		d.logger.Warn("graceful stop timed out, forcing")
+		d.agentServer.ForceStop()
+	}
+
 	d.transport.Close()
 	d.msgStore.Close()
 	return nil

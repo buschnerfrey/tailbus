@@ -61,15 +61,15 @@ pending: dict[str, asyncio.Future] = {}
 @agent.on_message
 async def handle(msg: Message):
     """Handle responses from delegated agents, or trigger a new briefing."""
-    # Ignore our own resolve messages (prevents infinite loop when fire session resolves)
-    if msg.message_type == "session_resolve":
-        return
-
     # Response from a delegated session?
     if msg.session in pending:
         fut = pending.pop(msg.session)
         if not fut.done():
             fut.set_result(msg.payload)
+        return
+
+    # Only session_open is a new briefing request; ignore resolves, acks, etc.
+    if msg.message_type != "session_open":
         return
 
     # New request — generate a briefing
@@ -94,7 +94,7 @@ async def handle(msg: Message):
         raw = await delegate("news", json.dumps({
             "command": "recent",
             "arguments": {"count": count, "hours": hours},
-        }), timeout=60)
+        }), timeout=120)
         news_data = json.loads(raw)
         articles = news_data.get("articles", [])
         total = news_data.get("count", 0)
