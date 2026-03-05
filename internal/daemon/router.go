@@ -91,7 +91,9 @@ func (r *MessageRouter) Route(_ context.Context, env *messagepb.Envelope) error 
 func (r *MessageRouter) recordRouteDone(env *messagepb.Envelope, remote bool, start time.Time) {
 	duration := time.Since(start)
 
-	if r.activity != nil {
+	// Don't emit activity events for ACKs — they're internal bookkeeping
+	// and would pollute the dashboard with spurious flashes.
+	if r.activity != nil && env.Type != messagepb.EnvelopeType_ENVELOPE_TYPE_ACK {
 		r.activity.EmitMessageRouted(env.SessionId, env.FromHandle, env.ToHandle, remote, env.TraceId, env.MessageId)
 	}
 
