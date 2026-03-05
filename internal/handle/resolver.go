@@ -35,10 +35,18 @@ type RelayInfo struct {
 	Addr      string
 }
 
+// NodeInfo holds basic info about a peer node (may have zero handles).
+type NodeInfo struct {
+	NodeID        string
+	AdvertiseAddr string
+	PublicKey     []byte
+}
+
 // Resolver resolves handle names to peer info using a cached peer map.
 type Resolver struct {
 	mu       sync.RWMutex
 	handleTo map[string]PeerInfo // handle name -> peer info
+	nodes    []NodeInfo          // all peer nodes (including those with no handles)
 	relays   []RelayInfo
 }
 
@@ -54,6 +62,22 @@ func (r *Resolver) UpdatePeerMap(entries map[string]PeerInfo) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.handleTo = entries
+}
+
+// UpdateNodes replaces the cached node list.
+func (r *Resolver) UpdateNodes(nodes []NodeInfo) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nodes = nodes
+}
+
+// GetNodes returns a snapshot of all known peer nodes.
+func (r *Resolver) GetNodes() []NodeInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]NodeInfo, len(r.nodes))
+	copy(result, r.nodes)
+	return result
 }
 
 // GetPeerMap returns a snapshot of the cached peer map.

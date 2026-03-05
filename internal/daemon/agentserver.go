@@ -771,20 +771,25 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 	// Build peer statuses from resolver + transport
 	var peers []*agentpb.PeerStatus
 	if s.dashResolver != nil {
-		peerMap := s.dashResolver.GetPeerMap()
-		// Group handles by node
+		// Build node list from all known nodes (including those with no handles)
 		nodeHandles := make(map[string][]string)
 		nodeInfo := make(map[string]*agentpb.PeerStatus)
-		for h, info := range peerMap {
-			// Skip self — local handles are already shown separately
-			if info.NodeID == s.nodeID {
+
+		for _, n := range s.dashResolver.GetNodes() {
+			if n.NodeID == s.nodeID {
 				continue
 			}
-			if _, ok := nodeInfo[info.NodeID]; !ok {
-				nodeInfo[info.NodeID] = &agentpb.PeerStatus{
-					NodeId:        info.NodeID,
-					AdvertiseAddr: info.AdvertiseAddr,
-				}
+			nodeInfo[n.NodeID] = &agentpb.PeerStatus{
+				NodeId:        n.NodeID,
+				AdvertiseAddr: n.AdvertiseAddr,
+			}
+		}
+
+		// Add handles from peer map
+		peerMap := s.dashResolver.GetPeerMap()
+		for h, info := range peerMap {
+			if info.NodeID == s.nodeID {
+				continue
 			}
 			nodeHandles[info.NodeID] = append(nodeHandles[info.NodeID], h)
 		}

@@ -284,10 +284,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if pending, err := d.msgStore.LoadPending(); err != nil {
 		d.logger.Warn("failed to load pending messages", "error", err)
 	} else if len(pending) > 0 {
+		restored := 0
 		for _, pm := range pending {
+			if pm.peerAddr == "" {
+				// Discard stale pending message with no peer address
+				_ = d.msgStore.RemovePending(pm.env.MessageId)
+				continue
+			}
 			d.ackTracker.Restore(pm)
+			restored++
 		}
-		d.logger.Info("restored pending messages for retry", "count", len(pending))
+		d.logger.Info("restored pending messages for retry", "count", restored)
 	}
 
 	// Start session eviction (5min TTL, 30s sweep)

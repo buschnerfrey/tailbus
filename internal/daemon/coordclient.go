@@ -137,7 +137,13 @@ func (c *CoordClient) WatchPeerMap(ctx context.Context) error {
 		}
 
 		entries := make(map[string]handle.PeerInfo)
+		var nodes []handle.NodeInfo
 		for _, p := range update.Peers {
+			nodes = append(nodes, handle.NodeInfo{
+				NodeID:        p.NodeId,
+				AdvertiseAddr: p.AdvertiseAddr,
+				PublicKey:     p.PublicKey,
+			})
 			for _, h := range p.Handles {
 				info := handle.PeerInfo{
 					NodeID:        p.NodeId,
@@ -156,6 +162,7 @@ func (c *CoordClient) WatchPeerMap(ctx context.Context) error {
 			}
 		}
 		c.resolver.UpdatePeerMap(entries)
+		c.resolver.UpdateNodes(nodes)
 
 		// Parse relay info
 		var relayInfos []handle.RelayInfo
