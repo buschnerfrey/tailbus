@@ -419,7 +419,11 @@ func main() {
 	case "stop":
 		_, err := client.Shutdown(ctx, &agentpb.ShutdownRequest{})
 		if err != nil {
-			logger.Error("stop failed", "error", err)
+			if strings.Contains(err.Error(), "no such file or directory") || strings.Contains(err.Error(), "connection refused") {
+				fmt.Fprintln(os.Stderr, "tailbusd is not running")
+			} else {
+				logger.Error("stop failed", "error", err)
+			}
 			os.Exit(1)
 		}
 		fmt.Println("tailbusd stopped")
