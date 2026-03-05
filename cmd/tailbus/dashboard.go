@@ -387,8 +387,11 @@ func (m dashboardModel) buildTopoNodes() []topoNode {
 		isLocal:   true,
 	})
 
-	// Peer nodes
+	// Peer nodes (skip self — already shown as local node)
 	for _, p := range m.status.Peers {
+		if p.NodeId == m.status.NodeId {
+			continue
+		}
 		handles := make([]string, len(p.Handles))
 		copy(handles, p.Handles)
 		sort.Strings(handles)
