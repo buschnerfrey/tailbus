@@ -6,6 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [v0.3.8] — 2026-03-05
+
+### Added
+- Auto-create a personal team for every user on signup — no manual `tailbus team create` needed
+- `tailbus login` auto-activates the user's team in credentials so the daemon uses it immediately
+
 ## [v0.3.7] — 2026-03-05
 
 ### Fixed
@@ -70,7 +76,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Real-time TUI dashboard
 - Release pipeline and install script
 
-[Unreleased]: https://github.com/alexanderfrey/tailbus/compare/v0.3.7...HEAD
+[Unreleased]: https://github.com/alexanderfrey/tailbus/compare/v0.3.8...HEAD
+[v0.3.8]: https://github.com/alexanderfrey/tailbus/compare/v0.3.7...v0.3.8
 [v0.3.7]: https://github.com/alexanderfrey/tailbus/compare/v0.3.6...v0.3.7
 [v0.3.6]: https://github.com/alexanderfrey/tailbus/compare/v0.3.5...v0.3.6
 [v0.3.5]: https://github.com/alexanderfrey/tailbus/compare/v0.3.0...v0.3.5

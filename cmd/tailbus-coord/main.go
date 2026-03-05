@@ -160,7 +160,7 @@ func main() {
 				Providers:   providers,
 				ExternalURL: externalURL,
 				WebAppURL:   webAppURL,
-			}, jwtIssuer, logger)
+			}, jwtIssuer, store, logger)
 			if err != nil {
 				logger.Error("failed to create OAuth server", "error", err)
 				os.Exit(1)

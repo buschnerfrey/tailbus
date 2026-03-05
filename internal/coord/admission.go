@@ -68,12 +68,17 @@ func (a *Admission) ValidateRegistration(authToken, nodeID string) (*AdmissionRe
 			return nil, fmt.Errorf("expected access token, got %s", claims.TokenType)
 		}
 
-		// Upsert user + bind node
+		// Upsert user + bind node + ensure personal team
 		if err := a.store.UpsertUser(claims.Email); err != nil {
 			a.logger.Error("failed to upsert user", "email", claims.Email, "error", err)
 		}
 		if err := a.store.BindNodeToUser(nodeID, claims.Email); err != nil {
 			a.logger.Error("failed to bind node to user", "node_id", nodeID, "email", claims.Email, "error", err)
+		}
+		if teamID, teamName, err := a.store.EnsurePersonalTeam(claims.Email); err != nil {
+			a.logger.Error("failed to ensure personal team", "email", claims.Email, "error", err)
+		} else if teamID != "" {
+			a.logger.Info("personal team created", "email", claims.Email, "team_id", teamID, "name", teamName)
 		}
 
 		a.logger.Info("node admitted via JWT", "node_id", nodeID, "email", claims.Email, "team_id", claims.TeamID)

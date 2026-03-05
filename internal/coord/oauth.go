@@ -67,6 +67,7 @@ type browserState struct {
 // OAuthServer implements the RFC 8628 device authorization flow and browser OAuth.
 type OAuthServer struct {
 	issuer      *JWTIssuer
+	store       *Store
 	providers   map[string]*oauthProvider
 	externalURL string
 	webAppURL   string
@@ -84,7 +85,7 @@ type oauthProvider struct {
 }
 
 // NewOAuthServer creates a new OAuth server with the given providers.
-func NewOAuthServer(cfg *OAuthConfig, issuer *JWTIssuer, logger *slog.Logger) (*OAuthServer, error) {
+func NewOAuthServer(cfg *OAuthConfig, issuer *JWTIssuer, store *Store, logger *slog.Logger) (*OAuthServer, error) {
 	webAppURL := strings.TrimRight(cfg.WebAppURL, "/")
 	if webAppURL == "" {
 		webAppURL = "https://tailbus.co"
@@ -92,6 +93,7 @@ func NewOAuthServer(cfg *OAuthConfig, issuer *JWTIssuer, logger *slog.Logger) (*
 
 	s := &OAuthServer{
 		issuer:        issuer,
+		store:         store,
 		providers:     make(map[string]*oauthProvider),
 		externalURL:   strings.TrimRight(cfg.ExternalURL, "/"),
 		webAppURL:     webAppURL,
@@ -376,6 +378,18 @@ func (s *OAuthServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("failed to issue JWT", "error", err)
 		http.Error(w, "failed to issue tokens", http.StatusInternalServerError)
 		return
+	}
+
+	// Ensure user has a personal team
+	if s.store != nil {
+		if err := s.store.UpsertUser(email); err != nil {
+			s.logger.Error("failed to upsert user", "email", email, "error", err)
+		}
+		if teamID, teamName, err := s.store.EnsurePersonalTeam(email); err != nil {
+			s.logger.Error("failed to ensure personal team", "email", email, "error", err)
+		} else if teamID != "" {
+			s.logger.Info("personal team created", "email", email, "team_id", teamID, "name", teamName)
+		}
 	}
 
 	if isBrowser {

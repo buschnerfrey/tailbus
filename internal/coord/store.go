@@ -3,6 +3,7 @@ package coord
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
@@ -701,6 +702,35 @@ func (s *Store) ConsumeTeamInvite(code string) (string, error) {
 	}
 
 	return teamID, tx.Commit()
+}
+
+// EnsurePersonalTeam creates a personal team for the user if they have none.
+// Returns the team ID and name. If the user already has teams, returns empty strings.
+func (s *Store) EnsurePersonalTeam(email string) (string, string, error) {
+	teams, err := s.ListUserTeams(email)
+	if err != nil {
+		return "", "", fmt.Errorf("list user teams: %w", err)
+	}
+	if len(teams) > 0 {
+		return "", "", nil // already has a team
+	}
+
+	// Derive team name from email prefix
+	name := email
+	if idx := strings.Index(email, "@"); idx > 0 {
+		name = email[:idx]
+	}
+
+	teamID := generateID(8)
+	if err := s.CreateTeam(teamID, name, email); err != nil {
+		// Name collision — append a short random suffix
+		teamID = generateID(8)
+		name = name + "-" + generateID(2)
+		if err := s.CreateTeam(teamID, name, email); err != nil {
+			return "", "", fmt.Errorf("create personal team: %w", err)
+		}
+	}
+	return teamID, name, nil
 }
 
 // GetNodesByTeam returns nodes belonging to a team plus all relay nodes.

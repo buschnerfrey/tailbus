@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
+	pb "github.com/alexanderfrey/tailbus/api/coordpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/auth"
 	"google.golang.org/grpc"
@@ -131,6 +132,20 @@ func main() {
 		}
 
 		fmt.Printf("\nLogged in as %s\n", tokenResp.Email)
+
+		// Auto-activate the user's team (personal team is created server-side on login)
+		client, creds, cleanup := teamCoordClient(credsPath)
+		listCtx, listCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		resp, err := client.ListTeams(listCtx, &pb.ListTeamsRequest{AuthToken: creds.AccessToken})
+		listCancel()
+		cleanup()
+		if err == nil && resp.Error == "" && len(resp.Teams) > 0 && creds.TeamID == "" {
+			creds.TeamID = resp.Teams[0].TeamId
+			creds.TeamName = resp.Teams[0].Name
+			_ = auth.SaveCredentials(credsPath, creds)
+			fmt.Printf("Active team: %s\n", creds.TeamName)
+		}
+
 		fmt.Printf("Credentials saved to %s\n", credsPath)
 		os.Exit(0)
 
