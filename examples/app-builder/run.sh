@@ -11,6 +11,7 @@ set -euo pipefail
 #   ./run.sh                    # start everything
 #   ./run.sh stop               # tear it all down
 #   ./run.sh fire "a todo app"  # send a build request
+#   ./run.sh logs               # watch the agent conversation
 #
 # Then open a dashboard against any node:
 #   tailbus -socket /tmp/appbuilder-orchestrator.sock dashboard
@@ -23,21 +24,13 @@ COORD_HEALTH=":18081"
 COORD_DATA="/tmp/appbuilder-coord"
 LOG_DIR="/tmp/appbuilder-logs"
 
-# Node definitions: name, listen port, metrics port
-declare -A NODES=(
-  [orchestrator]="19443:19091"
-  [claude-coder]="19444:19092"
-  [codex-coder]="19445:19093"
-  [lmstudio-coder]="19446:19094"
-)
-
-# Agent scripts per node
-declare -A AGENTS=(
-  [orchestrator]="orchestrator.py"
-  [claude-coder]="claude_coder.py"
-  [codex-coder]="codex_coder.py"
-  [lmstudio-coder]="lmstudio_coder.py"
-)
+# Node definitions: name:listen_port:metrics_port:script
+NODES="
+orchestrator:19443:19091:orchestrator.py
+claude-coder:19444:19092:claude_coder.py
+codex-coder:19445:19093:codex_coder.py
+lmstudio-coder:19446:19094:lmstudio_coder.py
+"
 
 DIM="\033[2m"
 BOLD="\033[1m"
@@ -57,37 +50,33 @@ fail() { echo -e "  ${DIM}run.sh${RESET}  ${RED}✗${RESET} $*"; exit 1; }
 stop_all() {
     say "stopping all app-builder processes..."
 
-    local pids=""
-    for name in "${!NODES[@]}"; do
+    for entry in $NODES; do
+        local name="${entry%%:*}"
         local sock="/tmp/appbuilder-${name}.sock"
+
         # Kill agent (python script using this socket)
-        local agent_pids=$(pgrep -f "TAILBUS_SOCKET=${sock}" 2>/dev/null || true)
+        local agent_pids
+        agent_pids=$(pgrep -f "TAILBUS_SOCKET=${sock}" 2>/dev/null || true)
         if [ -n "$agent_pids" ]; then
             kill $agent_pids 2>/dev/null || true
-            pids="$pids $agent_pids"
         fi
+
         # Kill daemon
-        local daemon_pids=$(pgrep -f "tailbusd.*-node-id ${name}" 2>/dev/null || true)
+        local daemon_pids
+        daemon_pids=$(pgrep -f "tailbusd.*-node-id ${name}" 2>/dev/null || true)
         if [ -n "$daemon_pids" ]; then
             kill $daemon_pids 2>/dev/null || true
-            pids="$pids $daemon_pids"
         fi
     done
 
     # Kill coord
-    local coord_pids=$(pgrep -f "tailbus-coord.*${COORD_ADDR}" 2>/dev/null || true)
+    local coord_pids
+    coord_pids=$(pgrep -f "tailbus-coord.*${COORD_ADDR}" 2>/dev/null || true)
     if [ -n "$coord_pids" ]; then
         kill $coord_pids 2>/dev/null || true
-        pids="$pids $coord_pids"
     fi
 
-    # Wait briefly for clean shutdown
-    if [ -n "$pids" ]; then
-        sleep 1
-        for pid in $pids; do
-            kill -0 $pid 2>/dev/null && kill -9 $pid 2>/dev/null || true
-        done
-    fi
+    sleep 1
 
     # Clean up sockets
     rm -f /tmp/appbuilder-*.sock
@@ -108,6 +97,26 @@ fire_build() {
     say "firing build request..."
     echo ""
     tailbus -socket "$sock" fire orchestrator "{\"command\":\"build\",\"arguments\":{\"app\":\"${app_spec}\"}}"
+}
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+
+watch_logs() {
+    if [ ! -d "$LOG_DIR" ]; then
+        fail "no logs found — is the demo running?"
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}Watching agent conversation${RESET}  ${DIM}(ctrl-c to stop)${RESET}"
+    echo -e "  ${DIM}────────────────────────────────────────${RESET}"
+    echo ""
+
+    tail -f \
+        "$LOG_DIR/agent-orchestrator.log" \
+        "$LOG_DIR/agent-claude-coder.log" \
+        "$LOG_DIR/agent-codex-coder.log" \
+        "$LOG_DIR/agent-lmstudio-coder.log" \
+        2>/dev/null
 }
 
 # ── Start ────────────────────────────────────────────────────────────────────
@@ -139,7 +148,6 @@ start_all() {
         -health-addr "$COORD_HEALTH" \
         > "$LOG_DIR/coord.log" 2>&1 &
 
-    # Wait for coord to be ready
     local retries=0
     while ! curl -sf "http://127.0.0.1${COORD_HEALTH}/healthz" >/dev/null 2>&1; do
         retries=$((retries + 1))
@@ -152,10 +160,9 @@ start_all() {
 
     # ── Start daemons ──
 
-    for name in orchestrator claude-coder codex-coder lmstudio-coder; do
-        local ports="${NODES[$name]}"
-        local listen_port="${ports%%:*}"
-        local metrics_port="${ports##*:}"
+    for entry in $NODES; do
+        local name listen_port metrics_port script
+        IFS=: read -r name listen_port metrics_port script <<< "$entry"
         local sock="/tmp/appbuilder-${name}.sock"
 
         say "starting daemon ${CYAN}${name}${RESET} on :${listen_port}..."
@@ -169,7 +176,6 @@ start_all() {
             -metrics ":${metrics_port}" \
             > "$LOG_DIR/daemon-${name}.log" 2>&1 &
 
-        # Wait for socket to appear
         retries=0
         while [ ! -S "$sock" ]; do
             retries=$((retries + 1))
@@ -178,7 +184,7 @@ start_all() {
             fi
             sleep 0.2
         done
-        good "daemon ${BOLD}${name}${RESET} ready (socket: ${DIM}${sock}${RESET})"
+        good "daemon ${BOLD}${name}${RESET} ready"
     done
 
     # ── Start agents ──
@@ -186,9 +192,10 @@ start_all() {
     echo ""
     say "starting agents..."
 
-    for name in orchestrator claude-coder codex-coder lmstudio-coder; do
+    for entry in $NODES; do
+        local name listen_port metrics_port script
+        IFS=: read -r name listen_port metrics_port script <<< "$entry"
         local sock="/tmp/appbuilder-${name}.sock"
-        local script="${AGENTS[$name]}"
 
         TAILBUS_SOCKET="$sock" python3 "${SCRIPT_DIR}/${script}" \
             > "$LOG_DIR/agent-${name}.log" 2>&1 &
@@ -209,38 +216,12 @@ start_all() {
     echo -e "  ${BOLD}Build an app:${RESET}"
     echo -e "    ./run.sh fire \"A todo app with HTML, CSS, and vanilla JS\""
     echo ""
-    echo -e "  ${BOLD}Watch agent logs:${RESET}"
-    echo -e "    tail -f $LOG_DIR/agent-orchestrator.log"
-    echo ""
     echo -e "  ${BOLD}Watch the conversation:${RESET}"
     echo -e "    ./run.sh logs"
     echo ""
     echo -e "  ${BOLD}Stop everything:${RESET}"
     echo -e "    ./run.sh stop"
     echo ""
-}
-
-# ── Main ─────────────────────────────────────────────────────────────────────
-
-# ── Logs ─────────────────────────────────────────────────────────────────────
-
-watch_logs() {
-    if [ ! -d "$LOG_DIR" ]; then
-        fail "no logs found — is the demo running?"
-    fi
-
-    echo ""
-    echo -e "  ${BOLD}Watching agent conversation${RESET}  ${DIM}(ctrl-c to stop)${RESET}"
-    echo -e "  ${DIM}────────────────────────────────────────${RESET}"
-    echo ""
-
-    # Tail all agent logs interleaved — this gives you the full dialog
-    tail -f \
-        "$LOG_DIR/agent-orchestrator.log" \
-        "$LOG_DIR/agent-claude-coder.log" \
-        "$LOG_DIR/agent-codex-coder.log" \
-        "$LOG_DIR/agent-lmstudio-coder.log" \
-        2>/dev/null
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
