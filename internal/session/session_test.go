@@ -37,6 +37,18 @@ func TestSequenceMonotonic(t *testing.T) {
 	}
 }
 
+func TestNextSequenceUpdatesUpdatedAt(t *testing.T) {
+	s := New("a", "b")
+	updatedAt := s.UpdatedAt
+
+	time.Sleep(10 * time.Millisecond)
+	s.NextSequence()
+
+	if !s.UpdatedAt.After(updatedAt) {
+		t.Fatalf("UpdatedAt = %v, want later than %v", s.UpdatedAt, updatedAt)
+	}
+}
+
 func TestResolve(t *testing.T) {
 	s := New("a", "b")
 	if err := s.Resolve(); err != nil {

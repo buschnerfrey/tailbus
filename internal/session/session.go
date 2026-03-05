@@ -55,6 +55,7 @@ func (s *Session) Clone() *Session {
 func (s *Session) NextSequence() uint64 {
 	seq := s.NextSeq
 	s.NextSeq++
+	s.UpdatedAt = time.Now()
 	return seq
 }
 

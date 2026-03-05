@@ -98,3 +98,45 @@ func TestDropAfterMaxRetries(t *testing.T) {
 		}
 	}
 }
+
+func TestRetryPersistsUpdatedRetryCount(t *testing.T) {
+	ms := testStore(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	at := NewAckTracker(func(string, *messagepb.Envelope) error { return nil }, logger)
+	at.SetStore(ms)
+	at.timeout = 0
+
+	env := &messagepb.Envelope{MessageId: "msg-persist"}
+	at.Track(env, "10.0.0.1:9443")
+	at.sweep()
+
+	loaded, err := ms.LoadPending()
+	if err != nil {
+		t.Fatalf("load pending: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("expected 1 pending message, got %d", len(loaded))
+	}
+	if loaded[0].retries != 1 {
+		t.Fatalf("retries = %d, want 1", loaded[0].retries)
+	}
+}
+
+func TestDropRemovesPendingFromStore(t *testing.T) {
+	ms := testStore(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	at := NewAckTracker(func(string, *messagepb.Envelope) error { return nil }, logger)
+	at.SetStore(ms)
+	at.timeout = 0
+	at.maxRetries = 0
+
+	env := &messagepb.Envelope{MessageId: "msg-drop-store"}
+	at.Track(env, "10.0.0.1:9443")
+	at.sweep()
+
+	if got := ms.PendingCount(); got != 0 {
+		t.Fatalf("pending in store = %d, want 0", got)
+	}
+}

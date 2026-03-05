@@ -10,26 +10,26 @@ import (
 )
 
 const (
-	defaultACKTimeout  = 5 * time.Second
-	defaultMaxRetries  = 3
+	defaultACKTimeout = 5 * time.Second
+	defaultMaxRetries = 3
 )
 
 type pendingMessage struct {
-	env       *messagepb.Envelope
-	peerAddr  string
-	sentAt    time.Time
-	retries   int
+	env      *messagepb.Envelope
+	peerAddr string
+	sentAt   time.Time
+	retries  int
 }
 
 // AckTracker tracks pending messages awaiting ACK and retries on timeout.
 type AckTracker struct {
-	mu      sync.Mutex
-	pending map[string]*pendingMessage // messageID -> pending
-	sendFn  func(addr string, env *messagepb.Envelope) error
-	logger  *slog.Logger
-	timeout time.Duration
+	mu         sync.Mutex
+	pending    map[string]*pendingMessage // messageID -> pending
+	sendFn     func(addr string, env *messagepb.Envelope) error
+	logger     *slog.Logger
+	timeout    time.Duration
 	maxRetries int
-	store   *MessageStore // optional durable backing
+	store      *MessageStore // optional durable backing
 }
 
 // NewAckTracker creates a new ACK tracker.
@@ -137,19 +137,38 @@ func (a *AckTracker) sweep() {
 		a.logger.Warn("dropping unacked message after max retries",
 			"message_id", id, "peer", pm.peerAddr, "retries", pm.retries)
 	}
+	store := a.store
 	a.mu.Unlock()
+
+	if store != nil {
+		for _, id := range dropIDs {
+			if err := store.RemovePending(id); err != nil {
+				a.logger.Warn("failed to remove dropped pending message from store", "message_id", id, "error", err)
+			}
+		}
+	}
 
 	// Retry outside the lock
 	for _, pm := range retryList {
 		if err := a.sendFn(pm.peerAddr, pm.env); err != nil {
 			a.logger.Warn("retry send failed", "message_id", pm.env.MessageId, "error", err)
 		}
+		var retrySentAt time.Time
+		var retryCount int
 		a.mu.Lock()
 		// Update the pending entry if it still exists (might have been ACKed in the meantime)
 		if existing, ok := a.pending[pm.env.MessageId]; ok {
 			existing.retries++
 			existing.sentAt = time.Now()
+			retrySentAt = existing.sentAt
+			retryCount = existing.retries
 		}
 		a.mu.Unlock()
+
+		if retryCount > 0 && store != nil {
+			if err := store.UpdatePending(pm.env.MessageId, retrySentAt, retryCount); err != nil {
+				a.logger.Warn("failed to update pending retry state", "message_id", pm.env.MessageId, "error", err)
+			}
+		}
 	}
 }

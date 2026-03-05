@@ -34,8 +34,8 @@ type connIDKey struct{}
 
 // connTracker implements grpc stats.Handler to track connection lifecycles.
 type connTracker struct {
-	nextID  atomic.Uint64
-	server  *AgentServer
+	nextID atomic.Uint64
+	server *AgentServer
 }
 
 func (ct *connTracker) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
@@ -82,11 +82,11 @@ type AgentServer struct {
 	authToken string
 	tokenPath string // path to token file (for cleanup)
 
-	mu              sync.RWMutex
-	handles         map[string]bool                                                       // registered handles on this node
-	manifests       map[string]*messagepb.ServiceManifest                                 // handle -> manifest
-	subscribers     map[string][]chan *agentpb.IncomingMessage                             // handle -> subscriber channels
-	onHandleChange  func(handles []string, manifests map[string]*messagepb.ServiceManifest) // called when handles change
+	mu             sync.RWMutex
+	handles        map[string]bool                                                         // registered handles on this node
+	manifests      map[string]*messagepb.ServiceManifest                                   // handle -> manifest
+	subscribers    map[string][]chan *agentpb.IncomingMessage                              // handle -> subscriber channels
+	onHandleChange func(handles []string, manifests map[string]*messagepb.ServiceManifest) // called when handles change
 
 	// Per-handle health stats
 	hstats map[string]*handleStats
@@ -366,6 +366,11 @@ func (s *AgentServer) DeliverToLocal(env *messagepb.Envelope) bool {
 				UpdatedAt:  time.Now(),
 			}
 			s.sessions.Put(sess)
+			s.logger.Info("created local session for remote session_open",
+				"session_id", sess.ID, "from", sess.FromHandle, "to", sess.ToHandle)
+		} else {
+			s.logger.Debug("session already exists for remote session_open",
+				"session_id", env.SessionId)
 		}
 	}
 
@@ -391,10 +396,6 @@ func (s *AgentServer) DeliverToLocal(env *messagepb.Envelope) bool {
 				hs.drops.Add(1)
 			}
 		}
-	}
-
-	if s.activity != nil {
-		s.activity.MessagesDeliveredLocal.Add(1)
 	}
 
 	if s.traceStore != nil && env.TraceId != "" {
@@ -429,6 +430,22 @@ func (s *AgentServer) HasHandle(h string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.handles[h]
+}
+
+func validateSessionParticipant(sess *session.Session, fromHandle string) error {
+	if fromHandle != sess.FromHandle && fromHandle != sess.ToHandle {
+		return status.Errorf(codes.PermissionDenied,
+			"handle %q is not a participant in session %q", fromHandle, sess.ID)
+	}
+	return nil
+}
+
+func validateSessionOpen(sess *session.Session) error {
+	if sess.State != session.StateOpen {
+		return status.Errorf(codes.FailedPrecondition,
+			"session %q is %s", sess.ID, sess.State)
+	}
+	return nil
 }
 
 // Register registers an agent handle on this node.
@@ -549,7 +566,17 @@ func (s *AgentServer) SendMessage(ctx context.Context, req *agentpb.SendMessageR
 
 	sess, ok := s.sessions.Get(req.SessionId)
 	if !ok {
+		s.logger.Error("session not found for send_message",
+			"session_id", req.SessionId,
+			"from_handle", req.FromHandle,
+			"store_size", len(s.sessions.ListAll()))
 		return nil, fmt.Errorf("session %q not found", req.SessionId)
+	}
+	if err := validateSessionParticipant(sess, req.FromHandle); err != nil {
+		return nil, err
+	}
+	if err := validateSessionOpen(sess); err != nil {
+		return nil, err
 	}
 
 	// Determine recipient
@@ -646,7 +673,17 @@ func (s *AgentServer) ResolveSession(ctx context.Context, req *agentpb.ResolveSe
 
 	sess, ok := s.sessions.Get(req.SessionId)
 	if !ok {
+		s.logger.Error("session not found for resolve",
+			"session_id", req.SessionId,
+			"from_handle", req.FromHandle,
+			"store_size", len(s.sessions.ListAll()))
 		return nil, fmt.Errorf("session %q not found", req.SessionId)
+	}
+	if err := validateSessionParticipant(sess, req.FromHandle); err != nil {
+		return nil, err
+	}
+	if err := validateSessionOpen(sess); err != nil {
+		return nil, err
 	}
 
 	toHandle := sess.ToHandle
@@ -717,10 +754,10 @@ func (s *AgentServer) ListSessions(_ context.Context, req *agentpb.ListSessionsR
 	var infos []*agentpb.SessionInfo
 	for _, sess := range sessions {
 		infos = append(infos, &agentpb.SessionInfo{
-			SessionId:    sess.ID,
-			FromHandle:   sess.FromHandle,
-			ToHandle:     sess.ToHandle,
-			State:        string(sess.State),
+			SessionId:     sess.ID,
+			FromHandle:    sess.FromHandle,
+			ToHandle:      sess.ToHandle,
+			State:         string(sess.State),
 			CreatedAtUnix: sess.CreatedAt.Unix(),
 			UpdatedAtUnix: sess.UpdatedAt.Unix(),
 		})

@@ -80,6 +80,10 @@ func (ms *MessageStore) Close() error {
 
 // StorePending persists a sent envelope that is awaiting ACK.
 func (ms *MessageStore) StorePending(env *messagepb.Envelope, peerAddr string) error {
+	return ms.storePending(env, peerAddr, time.Now().Unix(), 0)
+}
+
+func (ms *MessageStore) storePending(env *messagepb.Envelope, peerAddr string, storedAt int64, retries int) error {
 	raw, err := proto.Marshal(env)
 	if err != nil {
 		return fmt.Errorf("marshal envelope: %w", err)
@@ -88,7 +92,8 @@ func (ms *MessageStore) StorePending(env *messagepb.Envelope, peerAddr string) e
 	sp := storedPending{
 		EnvelopeRaw: raw,
 		PeerAddr:    peerAddr,
-		StoredAt:    time.Now().Unix(),
+		StoredAt:    storedAt,
+		Retries:     retries,
 	}
 	val, err := json.Marshal(sp)
 	if err != nil {
@@ -97,6 +102,30 @@ func (ms *MessageStore) StorePending(env *messagepb.Envelope, peerAddr string) e
 
 	return ms.db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketPending).Put([]byte(env.MessageId), val)
+	})
+}
+
+// UpdatePending updates retry metadata for a pending message.
+func (ms *MessageStore) UpdatePending(messageID string, sentAt time.Time, retries int) error {
+	return ms.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketPending)
+		raw := b.Get([]byte(messageID))
+		if raw == nil {
+			return nil
+		}
+
+		var sp storedPending
+		if err := json.Unmarshal(raw, &sp); err != nil {
+			return fmt.Errorf("unmarshal pending %s: %w", messageID, err)
+		}
+		sp.StoredAt = sentAt.Unix()
+		sp.Retries = retries
+
+		val, err := json.Marshal(sp)
+		if err != nil {
+			return fmt.Errorf("marshal pending %s: %w", messageID, err)
+		}
+		return b.Put([]byte(messageID), val)
 	})
 }
 

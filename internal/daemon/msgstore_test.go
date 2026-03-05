@@ -66,6 +66,33 @@ func TestMessageStore_PendingRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMessageStore_UpdatePendingRoundTrip(t *testing.T) {
+	ms := testStore(t)
+
+	env := &messagepb.Envelope{
+		MessageId: "msg-update",
+		Type:      messagepb.EnvelopeType_ENVELOPE_TYPE_MESSAGE,
+	}
+	if err := ms.StorePending(env, "10.0.0.1:9443"); err != nil {
+		t.Fatalf("store pending: %v", err)
+	}
+
+	if err := ms.UpdatePending("msg-update", time.Now().Add(time.Second), 2); err != nil {
+		t.Fatalf("update pending: %v", err)
+	}
+
+	loaded, err := ms.LoadPending()
+	if err != nil {
+		t.Fatalf("load pending: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("expected 1 pending, got %d", len(loaded))
+	}
+	if loaded[0].retries != 2 {
+		t.Fatalf("retries = %d, want 2", loaded[0].retries)
+	}
+}
+
 func TestMessageStore_SessionRoundTrip(t *testing.T) {
 	ms := testStore(t)
 
