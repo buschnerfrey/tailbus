@@ -63,6 +63,7 @@ func main() {
 		fmt.Println("\nDaemon commands:")
 		fmt.Println("  stop      Stop the running daemon")
 		fmt.Println("\nMesh commands:")
+		fmt.Println("  fire      One-shot: send message, wait for response, print, exit")
 		fmt.Println("  register, introspect, list, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
 		os.Exit(1)
 	}
@@ -481,6 +482,68 @@ func main() {
 				meta = " " + fmt.Sprintf("%v", parts)
 			}
 			fmt.Printf("  %s  %-40s  msg:%s  node:%s%s\n", ts, action, short(span.MessageId), span.NodeId, meta)
+		}
+
+	case "fire":
+		// One-shot: register temp handle, open session, wait for response, print, exit.
+		fireFlags := flag.NewFlagSet("fire", flag.ExitOnError)
+		fireTimeout := fireFlags.Duration("timeout", 120*time.Second, "response timeout")
+		fireFlags.Parse(args[1:])
+		if fireFlags.NArg() < 2 {
+			fmt.Println("Usage: tailbus fire <to> <payload> [-timeout 120s]")
+			os.Exit(1)
+		}
+		target := fireFlags.Arg(0)
+		payload := fireFlags.Arg(1)
+
+		// Register a temporary handle
+		tmpHandle := fmt.Sprintf("_fire_%d", time.Now().UnixNano())
+		regResp, err := client.Register(ctx, &agentpb.RegisterRequest{Handle: tmpHandle})
+		if err != nil || !regResp.Ok {
+			logger.Error("register failed", "error", err)
+			os.Exit(1)
+		}
+
+		// Subscribe to get the response
+		stream, err := client.Subscribe(ctx, &agentpb.SubscribeRequest{Handle: tmpHandle})
+		if err != nil {
+			logger.Error("subscribe failed", "error", err)
+			os.Exit(1)
+		}
+
+		// Open session to target
+		openResp, err := client.OpenSession(ctx, &agentpb.OpenSessionRequest{
+			FromHandle:  tmpHandle,
+			ToHandle:    target,
+			Payload:     []byte(payload),
+			ContentType: "application/json",
+		})
+		if err != nil {
+			logger.Error("open session failed", "error", err)
+			os.Exit(1)
+		}
+		sessionID := openResp.SessionId
+
+		// Wait for response on that session
+		deadline := time.After(*fireTimeout)
+		for {
+			select {
+			case <-deadline:
+				fmt.Fprintf(os.Stderr, "timeout waiting for response from @%s\n", target)
+				os.Exit(1)
+			default:
+			}
+			msg, err := stream.Recv()
+			if err != nil {
+				logger.Error("stream error", "error", err)
+				os.Exit(1)
+			}
+			env := msg.Envelope
+			if env.SessionId != sessionID {
+				continue
+			}
+			fmt.Println(string(env.Payload))
+			return
 		}
 
 	default:

@@ -154,6 +154,7 @@ message PeerStatus {
   string advertise_addr = 2;
   repeated string handles = 3;
   bool connected = 4;
+  string connectivity = 5; // "direct", "relay", or "offline"
 }
 
 message Counters {

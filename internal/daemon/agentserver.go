@@ -775,9 +775,24 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 			}
 		}
 
+		// Check if any relay is connected
+		anyRelayConnected := false
+		if s.dashTransport != nil {
+			anyRelayConnected = len(s.dashTransport.ConnectedRelayAddrs()) > 0
+		}
+
 		for nodeID, status := range nodeInfo {
 			status.Handles = nodeHandles[nodeID]
-			status.Connected = connectedAddrs[status.AdvertiseAddr]
+			if connectedAddrs[status.AdvertiseAddr] {
+				status.Connected = true
+				status.Connectivity = "direct"
+			} else if anyRelayConnected {
+				status.Connected = true
+				status.Connectivity = "relay"
+			} else {
+				status.Connected = false
+				status.Connectivity = "offline"
+			}
 			peers = append(peers, status)
 		}
 	}

@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [v0.3.9] — 2026-03-05
+
+### Added
+- Three-state peer connectivity in dashboard — peers reachable via relay now show `[relay]` instead of `[disconnected]`
+- Message flow animation — animated arrows on topology edges when messages are routed or sessions opened
+- Session chain detection — `FLOW: @briefing ──► @news ──► @analyst` summary line for multi-hop orchestration
+- `connectivity` field on `PeerStatus` proto (`"direct"`, `"relay"`, `"offline"`)
+
 ## [v0.3.8] — 2026-03-05
 
 ### Added

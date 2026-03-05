@@ -82,6 +82,17 @@ var (
 
 	queueWarnStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("220"))
+
+	flashEdgeStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("51")).
+			Bold(true)
+
+	flashNodeStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("51")).
+			Bold(true)
+
+	flowStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("51"))
 )
 
 // Top panel view mode
@@ -96,28 +107,41 @@ const (
 type statusMsg *agentpb.GetNodeStatusResponse
 type activityMsg *agentpb.ActivityEvent
 type tickMsg time.Time
+type animTickMsg time.Time
 type errMsg struct{ error }
+
+// edgeFlash represents a recent message flow between two handles.
+type edgeFlash struct {
+	fromHandle string
+	toHandle   string
+	at         time.Time
+}
+
+const flashDuration = 2 * time.Second
 
 // topoNode represents a node in the topology view.
 type topoNode struct {
-	id        string
-	handles   []string
-	addr      string
-	connected bool
-	isLocal   bool
-	isRelay   bool
+	id           string
+	handles      []string
+	addr         string
+	connected    bool
+	connectivity string // "direct", "relay", or "offline"
+	isLocal      bool
+	isRelay      bool
 }
 
 // Model
 type dashboardModel struct {
-	client   agentpb.AgentAPIClient
-	status   *agentpb.GetNodeStatusResponse
-	activity []activityEntry
-	width    int
-	height   int
-	err      error
-	quitting bool
-	topView  topViewMode
+	client    agentpb.AgentAPIClient
+	status    *agentpb.GetNodeStatusResponse
+	activity  []activityEntry
+	flashes   []edgeFlash
+	animFrame int
+	width     int
+	height    int
+	err       error
+	quitting  bool
+	topView   topViewMode
 }
 
 type activityEntry struct {
@@ -139,12 +163,19 @@ func (m dashboardModel) Init() tea.Cmd {
 		m.fetchStatus,
 		m.watchActivity,
 		tickCmd(),
+		animTickCmd(),
 	)
 }
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
+	})
+}
+
+func animTickCmd() tea.Cmd {
+	return tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
+		return animTickMsg(t)
 	})
 }
 
@@ -212,7 +243,36 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.activity) > maxActivity {
 			m.activity = m.activity[len(m.activity)-maxActivity:]
 		}
+		// Record edge flashes for flow animation
+		now := time.Now()
+		switch e := event.Event.(type) {
+		case *agentpb.ActivityEvent_MessageRouted:
+			m.flashes = append(m.flashes, edgeFlash{
+				fromHandle: e.MessageRouted.FromHandle,
+				toHandle:   e.MessageRouted.ToHandle,
+				at:         now,
+			})
+		case *agentpb.ActivityEvent_SessionOpened:
+			m.flashes = append(m.flashes, edgeFlash{
+				fromHandle: e.SessionOpened.FromHandle,
+				toHandle:   e.SessionOpened.ToHandle,
+				at:         now,
+			})
+		}
 		return m, m.watchNext
+
+	case animTickMsg:
+		m.animFrame = (m.animFrame + 1) % 4
+		// Expire old flashes
+		now := time.Now()
+		active := m.flashes[:0]
+		for _, f := range m.flashes {
+			if now.Sub(f.at) < flashDuration {
+				active = append(active, f)
+			}
+		}
+		m.flashes = active
+		return m, animTickCmd()
 
 	case tickMsg:
 		return m, tea.Batch(m.fetchStatus, tickCmd())
@@ -273,6 +333,39 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 	}
 }
 
+// hasFlashBetween checks if there's an active flash between two nodes (by handle overlap).
+func (m dashboardModel) hasFlashBetween(a, b topoNode) bool {
+	aHandles := make(map[string]bool, len(a.handles))
+	for _, h := range a.handles {
+		aHandles[h] = true
+	}
+	bHandles := make(map[string]bool, len(b.handles))
+	for _, h := range b.handles {
+		bHandles[h] = true
+	}
+	for _, f := range m.flashes {
+		if (aHandles[f.fromHandle] && bHandles[f.toHandle]) ||
+			(bHandles[f.fromHandle] && aHandles[f.toHandle]) {
+			return true
+		}
+	}
+	return false
+}
+
+// isNodeActive checks if a node is the destination of any active flash.
+func (m dashboardModel) isNodeActive(n topoNode) bool {
+	handles := make(map[string]bool, len(n.handles))
+	for _, h := range n.handles {
+		handles[h] = true
+	}
+	for _, f := range m.flashes {
+		if handles[f.toHandle] {
+			return true
+		}
+	}
+	return false
+}
+
 // buildTopoNodes converts status into a list of topology nodes.
 func (m dashboardModel) buildTopoNodes() []topoNode {
 	if m.status == nil {
@@ -299,11 +392,21 @@ func (m dashboardModel) buildTopoNodes() []topoNode {
 		handles := make([]string, len(p.Handles))
 		copy(handles, p.Handles)
 		sort.Strings(handles)
+		connectivity := p.Connectivity
+		if connectivity == "" {
+			// Backward compat: old daemons without connectivity field
+			if p.Connected {
+				connectivity = "direct"
+			} else {
+				connectivity = "offline"
+			}
+		}
 		nodes = append(nodes, topoNode{
-			id:        p.NodeId,
-			handles:   handles,
-			addr:      p.AdvertiseAddr,
-			connected: p.Connected,
+			id:           p.NodeId,
+			handles:      handles,
+			addr:         p.AdvertiseAddr,
+			connected:    p.Connected,
+			connectivity: connectivity,
 		})
 	}
 
@@ -320,6 +423,86 @@ func (m dashboardModel) buildTopoNodes() []topoNode {
 	return nodes
 }
 
+// detectFlowChains finds chains of open sessions (A→B, B→C => A→B→C).
+func (m dashboardModel) detectFlowChains() [][]string {
+	if m.status == nil {
+		return nil
+	}
+
+	// Collect open sessions as directed edges
+	type edge struct{ from, to string }
+	var edges []edge
+	outgoing := make(map[string][]string) // from -> [to, ...]
+	hasIncoming := make(map[string]bool)
+
+	for _, s := range m.status.Sessions {
+		if s.State != "open" {
+			continue
+		}
+		edges = append(edges, edge{s.FromHandle, s.ToHandle})
+		outgoing[s.FromHandle] = append(outgoing[s.FromHandle], s.ToHandle)
+		hasIncoming[s.ToHandle] = true
+	}
+
+	if len(edges) == 0 {
+		return nil
+	}
+
+	// Find chain roots (nodes with no incoming edges)
+	roots := make(map[string]bool)
+	for _, e := range edges {
+		if !hasIncoming[e.from] {
+			roots[e.from] = true
+		}
+	}
+
+	// Build chains from each root via DFS
+	var chains [][]string
+	visited := make(map[string]bool)
+	for root := range roots {
+		chain := []string{root}
+		current := root
+		visited[current] = true
+		for {
+			nexts := outgoing[current]
+			if len(nexts) == 0 {
+				break
+			}
+			next := nexts[0] // follow first path
+			if visited[next] {
+				break
+			}
+			visited[next] = true
+			chain = append(chain, next)
+			current = next
+		}
+		if len(chain) > 1 {
+			chains = append(chains, chain)
+		}
+	}
+
+	return chains
+}
+
+// renderFlowSummary renders the FLOW: line showing session chains.
+func (m dashboardModel) renderFlowSummary() string {
+	chains := m.detectFlowChains()
+	if len(chains) == 0 {
+		return ""
+	}
+
+	var parts []string
+	for _, chain := range chains {
+		var formatted []string
+		for _, h := range chain {
+			formatted = append(formatted, "@"+h)
+		}
+		parts = append(parts, strings.Join(formatted, " ──► "))
+	}
+
+	return flowStyle.Render("FLOW: "+strings.Join(parts, "  |  ")) + "\n"
+}
+
 // renderTopology dispatches to compact or graph mode based on width and node count.
 func (m dashboardModel) renderTopology(width, height int) string {
 	nodes := m.buildTopoNodes()
@@ -327,11 +510,14 @@ func (m dashboardModel) renderTopology(width, height int) string {
 		return headerStyle.Render("TOPOLOGY") + "\n" + helpStyle.Render("  (no data)")
 	}
 
+	// Show flow chain summary if any
+	flowLine := m.renderFlowSummary()
+
 	// Compact mode: narrow terminal or many nodes
 	if width < 100 || len(nodes) > 6 {
-		return m.renderTopologyCompact(nodes, width)
+		return flowLine + m.renderTopologyCompact(nodes, width)
 	}
-	return m.renderTopologyGraph(nodes, width, height)
+	return flowLine + m.renderTopologyGraph(nodes, width, height)
 }
 
 // renderTopologyCompact renders a simple list view of the topology.
@@ -361,21 +547,30 @@ func (m dashboardModel) renderTopologyCompact(nodes []topoNode, width int) strin
 				suffix = ": " + strings.Join(n.handles, ", ")
 			}
 		} else {
-			if n.connected {
+			switch n.connectivity {
+			case "direct":
 				icon = connectedStyle.Render("\u25cf")
 				label = remoteNodeStyle.Render(n.id)
-				suffix = " " + helpStyle.Render("[direct --]")
-			} else {
+				suffix = " " + helpStyle.Render("[direct]")
+			case "relay":
+				icon = relayNodeStyle.Render("\u25cf")
+				label = remoteNodeStyle.Render(n.id)
+				suffix = " " + relayNodeStyle.Render("[relay]")
+			default:
 				icon = disconnectedNodeStyle.Render("\u25cb")
 				label = disconnectedNodeStyle.Render(n.id)
-				suffix = " " + helpStyle.Render("[disconnected]")
+				suffix = " " + helpStyle.Render("[offline]")
 			}
 			if len(n.handles) > 0 {
 				suffix += ": " + strings.Join(n.handles, ", ")
 			}
 		}
 
-		line := fmt.Sprintf("  %s %s%s", icon, label, suffix)
+		prefix := "  "
+		if m.isNodeActive(n) {
+			prefix = flashEdgeStyle.Render("► ")
+		}
+		line := fmt.Sprintf("%s%s %s%s", prefix, icon, label, suffix)
 		if len(line) > width-2 {
 			line = line[:width-2]
 		}
@@ -411,7 +606,8 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 	}
 
 	// Build local node box
-	localBox := renderNodeBox(local, true)
+	localActive := m.isNodeActive(local)
+	localBox := renderNodeBox(local, true, localActive)
 
 	if len(remotes) == 0 {
 		b.WriteString(localBox)
@@ -438,8 +634,10 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 
 	// Render each remote with edge from local
 	for i, remote := range remotes {
-		remoteBox := renderNodeBox(remote, false)
-		edge := renderEdge(remote, maxLocalW)
+		remoteActive := m.isNodeActive(remote)
+		remoteBox := renderNodeBox(remote, false, remoteActive)
+		flashing := m.hasFlashBetween(local, remote)
+		edge := renderEdge(remote, maxLocalW, flashing, m.animFrame)
 
 		if i > 0 {
 			b.WriteString("\n")
@@ -506,7 +704,7 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 }
 
 // renderNodeBox renders an ASCII box for a topology node.
-func renderNodeBox(n topoNode, isLocal bool) string {
+func renderNodeBox(n topoNode, isLocal bool, active bool) string {
 	// Determine box width
 	nameLen := len(n.id)
 	maxContent := nameLen + 4 // icon + space + name + padding
@@ -524,10 +722,16 @@ func renderNodeBox(n topoNode, isLocal bool) string {
 	}
 	innerW := boxW - 4 // 2 border + 2 padding
 
+	// Choose border style based on active state
+	borderStyle := lipgloss.NewStyle()
+	if active {
+		borderStyle = flashNodeStyle
+	}
+
 	var b strings.Builder
 
 	// Top border
-	b.WriteString("  +" + strings.Repeat("-", innerW+2) + "+\n")
+	b.WriteString("  " + borderStyle.Render("+"+strings.Repeat("-", innerW+2)+"+") + "\n")
 
 	// Node name line with icon
 	icon := "\u25cf" // ●
@@ -537,11 +741,16 @@ func renderNodeBox(n topoNode, isLocal bool) string {
 	} else if n.isRelay {
 		icon = "\u25c7" // ◇
 		nameStyle = relayNodeStyle
-	} else if n.connected {
-		nameStyle = remoteNodeStyle
 	} else {
-		icon = "\u25cb" // ○
-		nameStyle = disconnectedNodeStyle
+		switch n.connectivity {
+		case "direct":
+			nameStyle = remoteNodeStyle
+		case "relay":
+			nameStyle = relayNodeStyle
+		default:
+			icon = "\u25cb" // ○
+			nameStyle = disconnectedNodeStyle
+		}
 	}
 
 	name := n.id
@@ -554,7 +763,7 @@ func renderNodeBox(n topoNode, isLocal bool) string {
 	if padR < 0 {
 		padR = 0
 	}
-	b.WriteString("  | " + nameLine + strings.Repeat(" ", padR) + "|\n")
+	b.WriteString("  " + borderStyle.Render("|") + " " + nameLine + strings.Repeat(" ", padR) + borderStyle.Render("|") + "\n")
 
 	// Handle lines (up to 3)
 	maxHandles := 3
@@ -567,7 +776,7 @@ func renderNodeBox(n topoNode, isLocal bool) string {
 			if padR < 0 {
 				padR = 0
 			}
-			b.WriteString("  | " + helpStyle.Render(more) + strings.Repeat(" ", padR) + "|\n")
+			b.WriteString("  " + borderStyle.Render("|") + " " + helpStyle.Render(more) + strings.Repeat(" ", padR) + borderStyle.Render("|") + "\n")
 			break
 		}
 		hName := h
@@ -578,58 +787,59 @@ func renderNodeBox(n topoNode, isLocal bool) string {
 		if padR < 0 {
 			padR = 0
 		}
-		b.WriteString("  | " + helpStyle.Render(hName) + strings.Repeat(" ", padR) + "|\n")
+		b.WriteString("  " + borderStyle.Render("|") + " " + helpStyle.Render(hName) + strings.Repeat(" ", padR) + borderStyle.Render("|") + "\n")
 	}
 
 	// Bottom border
-	b.WriteString("  +" + strings.Repeat("-", innerW+2) + "+")
+	b.WriteString("  " + borderStyle.Render("+"+strings.Repeat("-", innerW+2)+"+"))
 
 	return b.String()
 }
 
 // renderEdge renders the connection line between local and a remote node.
-func renderEdge(remote topoNode, localWidth int) string {
+func renderEdge(remote topoNode, localWidth int, flashing bool, animFrame int) string {
 	_ = localWidth
-	edgeW := 12
+	edgeW := 14
 
-	var lines []string
-	if remote.isRelay {
+	var edgeLine string
+	if flashing {
+		// Animated arrow pattern that shifts each frame
+		patterns := []string{
+			"──►─►─►──",
+			"───►─►─►─",
+			"────►─►─►",
+			"►────►─►─",
+		}
+		edgeLine = flashEdgeStyle.Render(patterns[animFrame%len(patterns)])
+	} else if remote.isRelay {
 		if remote.connected {
-			line := relayEdgeStyle.Render("~~~relay~~~")
-			pad := edgeW - 10
-			if pad < 0 {
-				pad = 0
-			}
-			lines = append(lines, strings.Repeat(" ", pad/2)+line+strings.Repeat(" ", (pad+1)/2))
+			edgeLine = relayEdgeStyle.Render("~~~relay~~~")
 		} else {
-			line := disconnectedNodeStyle.Render("- -relay- -")
-			pad := edgeW - 11
-			if pad < 0 {
-				pad = 0
-			}
-			lines = append(lines, strings.Repeat(" ", pad/2)+line+strings.Repeat(" ", (pad+1)/2))
+			edgeLine = disconnectedNodeStyle.Render("- -relay- -")
 		}
-	} else if remote.connected {
-		line := directEdgeStyle.Render("---direct--")
-		pad := edgeW - 11
-		if pad < 0 {
-			pad = 0
-		}
-		lines = append(lines, strings.Repeat(" ", pad/2)+line+strings.Repeat(" ", (pad+1)/2))
 	} else {
-		line := disconnectedNodeStyle.Render("- - - - - -")
-		pad := edgeW - 11
-		if pad < 0 {
-			pad = 0
+		switch remote.connectivity {
+		case "direct":
+			edgeLine = directEdgeStyle.Render("───direct───")
+		case "relay":
+			edgeLine = relayEdgeStyle.Render("~~~relay~~~~")
+		default:
+			edgeLine = disconnectedNodeStyle.Render("- - - - - -")
 		}
-		lines = append(lines, strings.Repeat(" ", pad/2)+line+strings.Repeat(" ", (pad+1)/2))
 	}
+
+	lineW := lipgloss.Width(edgeLine)
+	pad := edgeW - lineW
+	if pad < 0 {
+		pad = 0
+	}
+	paddedLine := strings.Repeat(" ", pad/2) + edgeLine + strings.Repeat(" ", (pad+1)/2)
 
 	// Pad to same height as a box (roughly 5 lines), edge on line 2
 	result := make([]string, 5)
 	for i := range result {
-		if i == 1 && len(lines) > 0 {
-			result[i] = lines[0]
+		if i == 1 {
+			result[i] = paddedLine
 		} else {
 			result[i] = strings.Repeat(" ", edgeW)
 		}
@@ -654,9 +864,22 @@ func (m dashboardModel) renderDetailView(width int) string {
 	}
 
 	for _, p := range m.status.Peers {
-		status := disconnectedNodeStyle.Render("[disconnected]")
-		if p.Connected {
-			status = connectedStyle.Render("[connected]")
+		connectivity := p.Connectivity
+		if connectivity == "" {
+			if p.Connected {
+				connectivity = "direct"
+			} else {
+				connectivity = "offline"
+			}
+		}
+		var status string
+		switch connectivity {
+		case "direct":
+			status = connectedStyle.Render("[direct]")
+		case "relay":
+			status = relayNodeStyle.Render("[relay]")
+		default:
+			status = disconnectedNodeStyle.Render("[offline]")
 		}
 		line := fmt.Sprintf("  %s  %s  %s", remoteNodeStyle.Render(p.NodeId), p.AdvertiseAddr, status)
 		if len(line) > width-2 {

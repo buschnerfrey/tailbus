@@ -1368,6 +1368,7 @@ type PeerStatus struct {
 	AdvertiseAddr string                 `protobuf:"bytes,2,opt,name=advertise_addr,json=advertiseAddr,proto3" json:"advertise_addr,omitempty"`
 	Handles       []string               `protobuf:"bytes,3,rep,name=handles,proto3" json:"handles,omitempty"`
 	Connected     bool                   `protobuf:"varint,4,opt,name=connected,proto3" json:"connected,omitempty"`
+	Connectivity  string                 `protobuf:"bytes,5,opt,name=connectivity,proto3" json:"connectivity,omitempty"` // "direct", "relay", or "offline"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1428,6 +1429,13 @@ func (x *PeerStatus) GetConnected() bool {
 		return x.Connected
 	}
 	return false
+}
+
+func (x *PeerStatus) GetConnectivity() string {
+	if x != nil {
+		return x.Connectivity
+	}
+	return ""
 }
 
 type Counters struct {
@@ -2258,13 +2266,14 @@ const file_tailbus_v1_agent_proto_rawDesc = "" +
 	"\fmessages_out\x18\x06 \x01(\x03R\vmessagesOut\x12\x14\n" +
 	"\x05drops\x18\a \x01(\x03R\x05drops\x12\x1f\n" +
 	"\vqueue_depth\x18\b \x01(\x05R\n" +
-	"queueDepth\"\x84\x01\n" +
+	"queueDepth\"\xa8\x01\n" +
 	"\n" +
 	"PeerStatus\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12%\n" +
 	"\x0eadvertise_addr\x18\x02 \x01(\tR\radvertiseAddr\x12\x18\n" +
 	"\ahandles\x18\x03 \x03(\tR\ahandles\x12\x1c\n" +
-	"\tconnected\x18\x04 \x01(\bR\tconnected\"\xaf\x02\n" +
+	"\tconnected\x18\x04 \x01(\bR\tconnected\x12\"\n" +
+	"\fconnectivity\x18\x05 \x01(\tR\fconnectivity\"\xaf\x02\n" +
 	"\bCounters\x12'\n" +
 	"\x0fmessages_routed\x18\x01 \x01(\x03R\x0emessagesRouted\x128\n" +
 	"\x18messages_delivered_local\x18\x02 \x01(\x03R\x16messagesDeliveredLocal\x120\n" +

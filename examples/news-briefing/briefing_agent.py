@@ -90,7 +90,7 @@ async def handle(msg: Message):
         raw = await delegate("news", json.dumps({
             "command": "recent",
             "arguments": {"count": count, "hours": hours},
-        }), timeout=30)
+        }), timeout=60)
         news_data = json.loads(raw)
         articles = news_data.get("articles", [])
         total = news_data.get("count", 0)
