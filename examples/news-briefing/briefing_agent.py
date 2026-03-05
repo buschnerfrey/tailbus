@@ -17,6 +17,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../sdk/python/src"))
@@ -63,6 +64,8 @@ async def handle(msg: Message):
     """Handle responses from delegated agents, or trigger a new briefing."""
     # Response from a delegated session?
     if msg.session in pending:
+        preview = msg.payload[:80] if msg.payload else ""
+        print(f"[briefing] delegate response session={msg.session[:8]} ({len(msg.payload)} bytes): {preview}...", flush=True)
         fut = pending.pop(msg.session)
         if not fut.done():
             fut.set_result(msg.payload)
@@ -70,9 +73,12 @@ async def handle(msg: Message):
 
     # Only session_open is a new briefing request; ignore resolves, acks, etc.
     if msg.message_type != "session_open":
+        print(f"[briefing] ignoring {msg.message_type} from @{msg.from_handle} session={msg.session[:8]}", flush=True)
         return
 
     # New request — generate a briefing
+    print(f"[briefing] new request from @{msg.from_handle} session={msg.session[:8]}", flush=True)
+    t0 = time.monotonic()
     try:
         data = json.loads(msg.payload)
         args = data.get("arguments", data)
@@ -84,12 +90,11 @@ async def handle(msg: Message):
         count = BRIEFING_COUNT
         hours = 24
 
-    print(f"\n{'='*60}", flush=True)
-    print(f"[briefing] generating briefing — {count} articles, last {hours}h", flush=True)
-    print(f"{'='*60}\n", flush=True)
+    print(f"[briefing] generating — {count} articles, last {hours}h", flush=True)
 
     # Step 1: Ask @news for recent articles (remote server)
-    print("[briefing] asking @news for recent articles...", flush=True)
+    print("[briefing] step 1/3: asking @news for recent articles...", flush=True)
+    t1 = time.monotonic()
     try:
         raw = await delegate("news", json.dumps({
             "command": "recent",
@@ -99,29 +104,35 @@ async def handle(msg: Message):
         articles = news_data.get("articles", [])
         total = news_data.get("count", 0)
     except asyncio.TimeoutError:
+        print(f"[briefing] @news timeout after {time.monotonic()-t1:.1f}s", flush=True)
         await agent.resolve(msg.session, json.dumps({
             "error": "@news did not respond — is it running on the server?",
         }), content_type="application/json")
         return
     except Exception as e:
+        print(f"[briefing] @news error after {time.monotonic()-t1:.1f}s: {e}", flush=True)
         await agent.resolve(msg.session, json.dumps({
             "error": f"Failed to reach @news: {e}",
         }), content_type="application/json")
         return
 
-    print(f"[briefing] got {len(articles)} articles from @news\n", flush=True)
+    print(f"[briefing] got {len(articles)} articles from @news in {time.monotonic()-t1:.1f}s", flush=True)
 
     if not articles:
+        print("[briefing] no articles found, resolving early", flush=True)
         await agent.resolve(msg.session, json.dumps({
             "briefing": "No recent articles found.",
         }), content_type="application/json")
         return
 
     # Step 2: Send each article to @analyst for LLM analysis (local)
+    print(f"[briefing] step 2/3: analyzing {len(articles)} articles via @analyst...", flush=True)
+    t2 = time.monotonic()
     analyses = []
     for i, article in enumerate(articles, 1):
         title = article.get("title", "Untitled")
-        print(f"[briefing] [{i}/{len(articles)}] → @analyst: {title[:60]}...", flush=True)
+        print(f"[briefing]   [{i}/{len(articles)}] → @analyst: {title[:60]}", flush=True)
+        ta = time.monotonic()
 
         try:
             raw = await delegate("analyst", json.dumps({
@@ -132,14 +143,15 @@ async def handle(msg: Message):
                 },
             }), timeout=120)
             result = json.loads(raw)
+            analysis = result.get("analysis", "No analysis available")
             analyses.append({
                 "title": title,
                 "link": article.get("link", ""),
                 "published": article.get("published", ""),
                 "tags": article.get("tags", []),
-                "analysis": result.get("analysis", "No analysis available"),
+                "analysis": analysis,
             })
-            print(f"[briefing] [{i}/{len(articles)}] done", flush=True)
+            print(f"[briefing]   [{i}/{len(articles)}] done in {time.monotonic()-ta:.1f}s", flush=True)
         except asyncio.TimeoutError:
             analyses.append({
                 "title": title,
@@ -148,9 +160,12 @@ async def handle(msg: Message):
                 "tags": article.get("tags", []),
                 "analysis": "[timeout — @analyst did not respond]",
             })
-            print(f"[briefing] [{i}/{len(articles)}] timeout", flush=True)
+            print(f"[briefing]   [{i}/{len(articles)}] timeout after {time.monotonic()-ta:.1f}s", flush=True)
+
+    print(f"[briefing] all analyses done in {time.monotonic()-t2:.1f}s", flush=True)
 
     # Step 3: Format the briefing
+    print("[briefing] step 3/3: formatting briefing...", flush=True)
     now = datetime.now().strftime("%B %d, %Y at %H:%M")
     lines = [f"# Daily News Briefing — {now}\n"]
     lines.append(f"*{len(analyses)} articles from the last {hours}h, analyzed by @analyst via LM Studio*\n")
@@ -169,9 +184,11 @@ async def handle(msg: Message):
 
     briefing_text = "\n".join(lines)
 
+    elapsed = time.monotonic() - t0
     print(f"\n{'='*60}", flush=True)
     print(briefing_text, flush=True)
-    print(f"{'='*60}\n", flush=True)
+    print(f"{'='*60}", flush=True)
+    print(f"[briefing] completed in {elapsed:.1f}s ({len(analyses)} articles)", flush=True)
 
     await agent.resolve(msg.session, json.dumps({
         "briefing": briefing_text,
@@ -183,6 +200,7 @@ async def handle(msg: Message):
 async def delegate(target: str, payload: str, timeout: float = 30) -> str:
     """Open a session to a target agent and wait for the response."""
     opened = await agent.open_session(target, payload, content_type="application/json")
+    print(f"[briefing] opened session {opened.session[:8]} → @{target} (timeout={timeout}s)", flush=True)
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
     pending[opened.session] = fut
     try:

@@ -226,6 +226,7 @@ async def fetch_recent(hours: int = None, count: int = 20) -> list[dict]:
         and _cache["data"] is not None
         and (now - _cache["ts"]) < CACHE_TTL
     ):
+        print(f"[news] cache hit ({int(CACHE_TTL - (now - _cache['ts']))}s remaining)", flush=True)
         return _cache["data"]
 
     if not _pool:
@@ -248,6 +249,7 @@ async def fetch_recent(hours: int = None, count: int = 20) -> list[dict]:
 @agent.on_message
 async def handle(msg: Message):
     """Route incoming requests to the right query."""
+    print(f"[news] incoming from @{msg.from_handle} session={msg.session[:8]} type={msg.message_type}", flush=True)
     try:
         data = json.loads(msg.payload)
     except json.JSONDecodeError:
@@ -270,7 +272,9 @@ async def handle(msg: Message):
     if command == "recent":
         count = int(args.get("count", 20))
         hours = int(args.get("hours", MAX_AGE_HOURS))
+        print(f"[news] {msg.session[:8]} recent: count={count}, hours={hours}", flush=True)
         articles = await fetch_recent(hours=hours, count=count)
+        print(f"[news] {msg.session[:8]} returning {len(articles)} articles", flush=True)
         await agent.resolve(
             msg.session,
             json.dumps({"articles": articles, "count": len(articles)}),
@@ -279,6 +283,7 @@ async def handle(msg: Message):
 
     elif command == "article":
         uuid_str = args.get("uuid", "")
+        print(f"[news] {msg.session[:8]} article: uuid={uuid_str}", flush=True)
         if not uuid_str:
             await agent.resolve(msg.session, json.dumps({"error": "uuid required"}),
                                 content_type="application/json")
@@ -289,18 +294,22 @@ async def handle(msg: Message):
             rows = await _pool.fetch(ARTICLE_QUERY, uid)
             if rows:
                 art = row_to_article(rows[0], full=True)
+                print(f"[news] {msg.session[:8]} found: {art['title'][:60]}", flush=True)
                 await agent.resolve(msg.session, json.dumps(art),
                                     content_type="application/json")
             else:
+                print(f"[news] {msg.session[:8]} not found", flush=True)
                 await agent.resolve(msg.session, json.dumps({"error": "not found"}),
                                     content_type="application/json")
         except Exception as e:
+            print(f"[news] {msg.session[:8]} error: {e}", flush=True)
             await agent.resolve(msg.session, json.dumps({"error": str(e)}),
                                 content_type="application/json")
 
     elif command == "search":
         query = args.get("query", "")
         count = int(args.get("count", 10))
+        print(f"[news] {msg.session[:8]} search: query={query!r}, count={count}", flush=True)
         if not query:
             await agent.resolve(msg.session, json.dumps({"error": "query required"}),
                                 content_type="application/json")
@@ -308,16 +317,19 @@ async def handle(msg: Message):
         try:
             rows = await _pool.fetch(SEARCH_QUERY, MAX_AGE_HOURS, query, count)
             articles = [row_to_article(row) for row in rows]
+            print(f"[news] {msg.session[:8]} found {len(articles)} results for {query!r}", flush=True)
             await agent.resolve(
                 msg.session,
                 json.dumps({"articles": articles, "count": len(articles), "query": query}),
                 content_type="application/json",
             )
         except Exception as e:
+            print(f"[news] {msg.session[:8]} search error: {e}", flush=True)
             await agent.resolve(msg.session, json.dumps({"error": str(e)}),
                                 content_type="application/json")
 
     else:
+        print(f"[news] {msg.session[:8]} unknown command: {command}", flush=True)
         await agent.resolve(
             msg.session,
             json.dumps({"error": f"Unknown command: {command}",

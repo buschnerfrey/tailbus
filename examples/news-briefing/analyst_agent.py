@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 import urllib.request
 import urllib.error
 
@@ -102,9 +103,11 @@ def llm_analyze(title: str, summary: str, articles: list[str] | None = None) -> 
 @agent.on_message
 async def handle(msg: Message):
     """Analyze a news cluster using the local LLM."""
+    print(f"[analyst] incoming from @{msg.from_handle} session={msg.session[:8]} type={msg.message_type}", flush=True)
     try:
         data = json.loads(msg.payload)
     except json.JSONDecodeError:
+        print(f"[analyst] {msg.session[:8]} bad JSON payload", flush=True)
         await agent.resolve(msg.session, json.dumps({
             "error": "Expected JSON with title and summary",
         }), content_type="application/json")
@@ -123,17 +126,25 @@ async def handle(msg: Message):
     articles = args.get("articles", [])
 
     if not summary:
+        print(f"[analyst] {msg.session[:8]} no summary provided, skipping", flush=True)
         await agent.resolve(msg.session, json.dumps({
             "error": "No summary provided — nothing to analyze",
         }), content_type="application/json")
         return
 
-    print(f"[analyst] analyzing: {title[:60]}...", flush=True)
+    print(f"[analyst] {msg.session[:8]} analyzing: {title[:60]} (summary: {len(summary)} chars)", flush=True)
+    print(f"[analyst] {msg.session[:8]} calling LM Studio at {LLM_BASE_URL}...", flush=True)
 
+    t0 = time.monotonic()
     loop = asyncio.get_running_loop()
     analysis = await loop.run_in_executor(None, llm_analyze, title, summary, articles)
+    elapsed = time.monotonic() - t0
 
-    print(f"[analyst] done: {title[:60]}", flush=True)
+    is_error = analysis.startswith("[analyst error]")
+    if is_error:
+        print(f"[analyst] {msg.session[:8]} LLM error after {elapsed:.1f}s: {analysis}", flush=True)
+    else:
+        print(f"[analyst] {msg.session[:8]} done in {elapsed:.1f}s ({len(analysis)} chars)", flush=True)
 
     await agent.resolve(msg.session, json.dumps({
         "title": title,
