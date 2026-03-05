@@ -380,9 +380,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// When local handles change, re-register with coord so peer map updates immediately
 	d.agentServer.SetOnHandleChange(func(handles []string, manifests map[string]*messagepb.ServiceManifest) {
-		if err := cc.Register(innerCtx, handles, manifests); err != nil {
-			d.logger.Error("failed to re-register handles with coord", "error", err)
+		handleSnapshot := append([]string(nil), handles...)
+		manifestSnapshot := make(map[string]*messagepb.ServiceManifest, len(manifests))
+		for handle, manifest := range manifests {
+			manifestSnapshot[handle] = manifest
 		}
+		go func() {
+			if err := registerHandlesWithRetry(innerCtx, cc, d.logger, handleSnapshot, manifestSnapshot); err != nil && innerCtx.Err() == nil {
+				d.logger.Error("failed to re-register handles with coord after retries", "error", err)
+			}
+		}()
 	})
 
 	// Start P2P transport listener
@@ -482,6 +489,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 func registerWithRetry(ctx context.Context, cc *CoordClient, logger *slog.Logger) error {
 	return retryWithBackoff(ctx, time.Second, 30*time.Second, logger, func() error {
 		return cc.Register(ctx, nil, nil)
+	})
+}
+
+func registerHandlesWithRetry(ctx context.Context, cc *CoordClient, logger *slog.Logger, handles []string, manifests map[string]*messagepb.ServiceManifest) error {
+	return retryWithBackoff(ctx, 100*time.Millisecond, 2*time.Second, logger, func() error {
+		return cc.Register(ctx, handles, manifests)
 	})
 }
 

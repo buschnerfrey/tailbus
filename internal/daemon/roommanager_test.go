@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	transportpb "github.com/alexanderfrey/tailbus/api/transportpb"
@@ -75,5 +76,76 @@ func TestRoomManagerCreatePostReplayAndClose(t *testing.T) {
 	}
 	if _, err := rm.PostMessage(context.Background(), room.RoomId, "alice", []byte("after close"), "text/plain", ""); err == nil {
 		t.Fatal("expected post after close to fail")
+	}
+}
+
+func TestRoomManagerCachesRemoteRoomEventMetadata(t *testing.T) {
+	store := testStore(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	resolver := handle.NewResolver()
+	resolver.UpdatePeerMap(map[string]handle.PeerInfo{
+		"orchestrator": {NodeID: "node-1", AdvertiseAddr: "10.0.0.1:9443"},
+	})
+	tp := &fakeRoomTransport{}
+	deliverer := &fakeRoomDeliverer{}
+	rm := NewRoomManager("node-2", resolver, tp, deliverer, store, NewActivityBus(), logger)
+
+	event := &messagepb.RoomEvent{
+		EventId:      "evt-1",
+		RoomId:       "room-remote",
+		RoomSeq:      3,
+		SenderHandle: "orchestrator",
+		Members:      []string{"orchestrator", "codex-solver"},
+		SentAtUnix:   time.Now().Unix(),
+		Type:         messagepb.RoomEventType_ROOM_EVENT_TYPE_MESSAGE_POSTED,
+	}
+	rm.HandleTransportMessage(context.Background(), &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_RoomEvent{RoomEvent: event},
+	})
+
+	room, err := store.LoadRoom("room-remote")
+	if err != nil {
+		t.Fatalf("load room: %v", err)
+	}
+	if room == nil {
+		t.Fatal("expected cached room metadata")
+	}
+	if room.HomeNodeId != "node-1" {
+		t.Fatalf("home node = %q, want node-1", room.HomeNodeId)
+	}
+	if room.NextSeq != 4 {
+		t.Fatalf("next seq = %d, want 4", room.NextSeq)
+	}
+	if len(deliverer.events) != 1 {
+		t.Fatalf("local deliveries = %d, want 1", len(deliverer.events))
+	}
+}
+
+func TestRoomMessageActivityMeta(t *testing.T) {
+	event := &messagepb.RoomEvent{
+		ContentType: "application/json",
+		Payload: []byte(`{
+			"kind":"turn_request",
+			"target":"codex-solver",
+			"turn_id":"turn-123",
+			"status":"working",
+			"round":2
+		}`),
+	}
+	kind, target, turnID, status, round := roomMessageActivityMeta(event)
+	if kind != "turn_request" {
+		t.Fatalf("kind = %q, want turn_request", kind)
+	}
+	if target != "codex-solver" {
+		t.Fatalf("target = %q, want codex-solver", target)
+	}
+	if turnID != "turn-123" {
+		t.Fatalf("turn id = %q, want turn-123", turnID)
+	}
+	if status != "working" {
+		t.Fatalf("status = %q, want working", status)
+	}
+	if round != 2 {
+		t.Fatalf("round = %d, want 2", round)
 	}
 }

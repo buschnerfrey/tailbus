@@ -18,6 +18,8 @@ from tailbus import AsyncAgent, Manifest, RoomEvent
 
 CODEX_TIMEOUT = int(os.environ.get("CODEX_TIMEOUT", "180"))
 MAX_TRANSCRIPT_CHARS = int(os.environ.get("PAIR_SOLVER_TRANSCRIPT_CHARS", "16000"))
+ROOM_REPLAY_RETRIES = int(os.environ.get("PAIR_SOLVER_ROOM_REPLAY_RETRIES", "12"))
+ROOM_REPLAY_DELAY = float(os.environ.get("PAIR_SOLVER_ROOM_REPLAY_DELAY", "0.5"))
 
 DIM = "\033[2m"
 BOLD = "\033[1m"
@@ -126,8 +128,22 @@ async def run_codex(prompt: str, output_file: str, timeout: int) -> str:
                 pass
 
 
+async def replay_room_with_retry(room_id: str) -> list[RoomEvent]:
+    last_error: Exception | None = None
+    for attempt in range(ROOM_REPLAY_RETRIES):
+        try:
+            return await agent.replay_room(room_id)
+        except Exception as exc:
+            last_error = exc
+            if attempt == ROOM_REPLAY_RETRIES - 1:
+                break
+            await asyncio.sleep(ROOM_REPLAY_DELAY)
+    assert last_error is not None
+    raise last_error
+
+
 async def solve_turn(room_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    events = await agent.replay_room(room_id)
+    events = await replay_room_with_retry(room_id)
     transcript = render_transcript(events)
     prompt = (
         "You are Codex in a Tailbus shared room.\n\n"
@@ -184,7 +200,20 @@ async def handle(msg: RoomEvent) -> None:
         return
     seen_turns.add(turn_id)
     say(f"round {payload.get('round', '?')} {BOLD}{payload.get('response_type', 'turn')}{RESET}...")
-    reply = await solve_turn(msg.room_id, payload)
+    try:
+        reply = await solve_turn(msg.room_id, payload)
+    except Exception as exc:
+        reply = {
+            "kind": "solver_reply",
+            "turn_id": turn_id,
+            "author": agent.handle,
+            "round": payload.get("round"),
+            "response_type": payload.get("response_type"),
+            "status": "error",
+            "error": str(exc),
+            "content": "",
+            "elapsed_sec": 0.0,
+        }
     if reply["status"] == "ok":
         say(f"{GREEN}✓{RESET} posted reply in {reply['elapsed_sec']:.1f}s")
     else:

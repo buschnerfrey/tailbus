@@ -2939,6 +2939,12 @@ type RoomMessagePostedEvent struct {
 	FromHandle    string                 `protobuf:"bytes,3,opt,name=from_handle,json=fromHandle,proto3" json:"from_handle,omitempty"`
 	MemberHandles []string               `protobuf:"bytes,4,rep,name=member_handles,json=memberHandles,proto3" json:"member_handles,omitempty"`
 	TraceId       string                 `protobuf:"bytes,5,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
+	ContentType   string                 `protobuf:"bytes,6,opt,name=content_type,json=contentType,proto3" json:"content_type,omitempty"`
+	ContentKind   string                 `protobuf:"bytes,7,opt,name=content_kind,json=contentKind,proto3" json:"content_kind,omitempty"`
+	TargetHandle  string                 `protobuf:"bytes,8,opt,name=target_handle,json=targetHandle,proto3" json:"target_handle,omitempty"`
+	TurnId        string                 `protobuf:"bytes,9,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
+	Status        string                 `protobuf:"bytes,10,opt,name=status,proto3" json:"status,omitempty"`
+	Round         uint32                 `protobuf:"varint,11,opt,name=round,proto3" json:"round,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3006,6 +3012,48 @@ func (x *RoomMessagePostedEvent) GetTraceId() string {
 		return x.TraceId
 	}
 	return ""
+}
+
+func (x *RoomMessagePostedEvent) GetContentType() string {
+	if x != nil {
+		return x.ContentType
+	}
+	return ""
+}
+
+func (x *RoomMessagePostedEvent) GetContentKind() string {
+	if x != nil {
+		return x.ContentKind
+	}
+	return ""
+}
+
+func (x *RoomMessagePostedEvent) GetTargetHandle() string {
+	if x != nil {
+		return x.TargetHandle
+	}
+	return ""
+}
+
+func (x *RoomMessagePostedEvent) GetTurnId() string {
+	if x != nil {
+		return x.TurnId
+	}
+	return ""
+}
+
+func (x *RoomMessagePostedEvent) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *RoomMessagePostedEvent) GetRound() uint32 {
+	if x != nil {
+		return x.Round
+	}
+	return 0
 }
 
 type RoomMemberJoinedEvent struct {
@@ -3647,14 +3695,21 @@ const file_tailbus_v1_agent_proto_rawDesc = "" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x1d\n" +
 	"\n" +
 	"created_by\x18\x03 \x01(\tR\tcreatedBy\x12%\n" +
-	"\x0emember_handles\x18\x04 \x03(\tR\rmemberHandles\"\xaf\x01\n" +
+	"\x0emember_handles\x18\x04 \x03(\tR\rmemberHandles\"\xe1\x02\n" +
 	"\x16RoomMessagePostedEvent\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x19\n" +
 	"\broom_seq\x18\x02 \x01(\x04R\aroomSeq\x12\x1f\n" +
 	"\vfrom_handle\x18\x03 \x01(\tR\n" +
 	"fromHandle\x12%\n" +
 	"\x0emember_handles\x18\x04 \x03(\tR\rmemberHandles\x12\x19\n" +
-	"\btrace_id\x18\x05 \x01(\tR\atraceId\"o\n" +
+	"\btrace_id\x18\x05 \x01(\tR\atraceId\x12!\n" +
+	"\fcontent_type\x18\x06 \x01(\tR\vcontentType\x12!\n" +
+	"\fcontent_kind\x18\a \x01(\tR\vcontentKind\x12#\n" +
+	"\rtarget_handle\x18\b \x01(\tR\ftargetHandle\x12\x17\n" +
+	"\aturn_id\x18\t \x01(\tR\x06turnId\x12\x16\n" +
+	"\x06status\x18\n" +
+	" \x01(\tR\x06status\x12\x14\n" +
+	"\x05round\x18\v \x01(\rR\x05round\"o\n" +
 	"\x15RoomMemberJoinedEvent\x12\x17\n" +
 	"\aroom_id\x18\x01 \x01(\tR\x06roomId\x12\x16\n" +
 	"\x06handle\x18\x02 \x01(\tR\x06handle\x12%\n" +

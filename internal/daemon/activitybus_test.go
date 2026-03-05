@@ -106,7 +106,7 @@ func TestActivityBus_Counters(t *testing.T) {
 	bus.EmitMessageRouted("s2", "c", "d", true, "t2", "m2")
 	bus.EmitMessageRouted("s2", "c", "d", true, "t2", "m3")
 	bus.EmitRoomCreated("room-1", "design-review", "a", []string{"a", "b"})
-	bus.EmitRoomMessagePosted("room-1", 1, "a", []string{"a", "b"}, "trace-room")
+	bus.EmitRoomMessagePosted("room-1", 1, "a", []string{"a", "b"}, "trace-room", "application/json", "turn_request", "b", "turn-1", "", 1)
 	bus.EmitRoomMemberJoined("room-1", "c", []string{"a", "b", "c"})
 	bus.EmitRoomMemberLeft("room-1", "b", []string{"a", "c"})
 	bus.EmitRoomClosed("room-1", "a", []string{"a", "c"})

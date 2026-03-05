@@ -122,6 +122,16 @@ type edgeFlash struct {
 
 const flashDuration = 2 * time.Second
 
+type busyTurn struct {
+	turnID     string
+	roomID     string
+	fromHandle string
+	toHandle   string
+	round      uint32
+	since      time.Time
+	status     string
+}
+
 // topoNode represents a node in the topology view.
 type topoNode struct {
 	id           string
@@ -139,6 +149,7 @@ type dashboardModel struct {
 	status    *agentpb.GetNodeStatusResponse
 	activity  []activityEntry
 	flashes   []edgeFlash
+	busyTurns map[string]busyTurn
 	animFrame int
 	width     int
 	height    int
@@ -157,7 +168,8 @@ const maxActivity = 50
 
 func newDashboardModel(client agentpb.AgentAPIClient) dashboardModel {
 	return dashboardModel{
-		client: client,
+		client:    client,
+		busyTurns: make(map[string]busyTurn),
 	}
 }
 
@@ -262,6 +274,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				at:         now,
 			})
 		case *agentpb.ActivityEvent_RoomMessagePosted:
+			m.updateBusyTurns(e.RoomMessagePosted, now)
 			for _, member := range e.RoomMessagePosted.MemberHandles {
 				if member == "" || member == e.RoomMessagePosted.FromHandle {
 					continue
@@ -351,13 +364,34 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 		}
 	case *agentpb.ActivityEvent_RoomMessagePosted:
 		roomID := shortID(e.RoomMessagePosted.RoomId)
-		recipients := len(e.RoomMessagePosted.MemberHandles) - 1
-		if recipients < 0 {
-			recipients = 0
-		}
 		traceTag := ""
 		if e.RoomMessagePosted.TraceId != "" {
 			traceTag = fmt.Sprintf(" t:%s", shortID(e.RoomMessagePosted.TraceId))
+		}
+		switch e.RoomMessagePosted.ContentKind {
+		case "turn_request":
+			label := fmt.Sprintf("TURN %s r%d %s -> %s%s", roomID, e.RoomMessagePosted.Round, e.RoomMessagePosted.FromHandle, e.RoomMessagePosted.TargetHandle, traceTag)
+			return activityEntry{time: ts, label: label, style: actRoomStyle}
+		case "solver_reply":
+			status := e.RoomMessagePosted.Status
+			if status == "" {
+				status = "ok"
+			}
+			label := fmt.Sprintf("REPLY %s r%d %s [%s]%s", roomID, e.RoomMessagePosted.Round, e.RoomMessagePosted.FromHandle, status, traceTag)
+			return activityEntry{time: ts, label: label, style: actRoomStyle}
+		case "turn_timeout":
+			label := fmt.Sprintf("TIMEOUT %s r%d %s%s", roomID, e.RoomMessagePosted.Round, e.RoomMessagePosted.TargetHandle, traceTag)
+			return activityEntry{time: ts, label: label, style: actRoomStyle}
+		case "problem_opened":
+			label := fmt.Sprintf("PROBLEM %s by %s%s", roomID, e.RoomMessagePosted.FromHandle, traceTag)
+			return activityEntry{time: ts, label: label, style: actRoomStyle}
+		case "final_summary":
+			label := fmt.Sprintf("FINAL %s by %s%s", roomID, e.RoomMessagePosted.FromHandle, traceTag)
+			return activityEntry{time: ts, label: label, style: actRoomStyle}
+		}
+		recipients := len(e.RoomMessagePosted.MemberHandles) - 1
+		if recipients < 0 {
+			recipients = 0
 		}
 		return activityEntry{
 			time:  ts,
@@ -384,6 +418,33 @@ func formatActivity(event *agentpb.ActivityEvent) activityEntry {
 		}
 	default:
 		return activityEntry{time: ts, label: "???", style: helpStyle}
+	}
+}
+
+func (m *dashboardModel) updateBusyTurns(event *agentpb.RoomMessagePostedEvent, now time.Time) {
+	if event == nil {
+		return
+	}
+	turnID := event.TurnId
+	if turnID == "" {
+		return
+	}
+	switch event.ContentKind {
+	case "turn_request":
+		if event.TargetHandle == "" {
+			return
+		}
+		m.busyTurns[turnID] = busyTurn{
+			turnID:     turnID,
+			roomID:     event.RoomId,
+			fromHandle: event.FromHandle,
+			toHandle:   event.TargetHandle,
+			round:      event.Round,
+			since:      now,
+			status:     "working",
+		}
+	case "solver_reply", "turn_timeout":
+		delete(m.busyTurns, turnID)
 	}
 }
 
@@ -424,6 +485,14 @@ func (m dashboardModel) flashDirBetween(a, b topoNode) flashDirection {
 			dir |= flashBtoA
 		}
 	}
+	for _, bt := range m.busyTurns {
+		if aHandles[bt.fromHandle] && bHandles[bt.toHandle] {
+			dir |= flashAtoB
+		}
+		if bHandles[bt.fromHandle] && aHandles[bt.toHandle] {
+			dir |= flashBtoA
+		}
+	}
 	return dir
 }
 
@@ -435,6 +504,11 @@ func (m dashboardModel) isNodeActive(n topoNode) bool {
 	}
 	for _, f := range m.flashes {
 		if handles[f.toHandle] {
+			return true
+		}
+	}
+	for _, bt := range m.busyTurns {
+		if handles[bt.toHandle] {
 			return true
 		}
 	}
@@ -808,6 +882,11 @@ func (m dashboardModel) activeHandlesFor(n topoNode) map[string]bool {
 	for _, f := range m.flashes {
 		if handles[f.toHandle] {
 			result[f.toHandle] = true
+		}
+	}
+	for _, bt := range m.busyTurns {
+		if handles[bt.toHandle] {
+			result[bt.toHandle] = true
 		}
 	}
 	return result
@@ -1240,6 +1319,41 @@ func (m dashboardModel) renderHandlesSessions(width, maxLines int) string {
 				seq = 0
 			}
 			line := fmt.Sprintf("  %s %s m:%d seq:%d %s", shortID(room.RoomId), title, len(room.Members), seq, stateStr)
+			if lipgloss.Width(line) > width-2 {
+				line = line[:width-2]
+			}
+			b.WriteString(line + "\n")
+			lines++
+			shown++
+		}
+	}
+
+	// Work
+	remaining = maxLines - lines
+	b.WriteString(headerStyle.Render("WORK") + "\n")
+	lines++
+	remaining--
+	if len(m.busyTurns) == 0 {
+		b.WriteString(helpStyle.Render("  (idle)") + "\n")
+		lines++
+	} else {
+		turns := make([]busyTurn, 0, len(m.busyTurns))
+		for _, turn := range m.busyTurns {
+			turns = append(turns, turn)
+		}
+		sort.Slice(turns, func(i, j int) bool {
+			return turns[i].since.Before(turns[j].since)
+		})
+		shown := 0
+		workLimit := remaining
+		if workLimit > 4 {
+			workLimit = 4
+		}
+		for _, turn := range turns {
+			if shown >= workLimit {
+				break
+			}
+			line := fmt.Sprintf("  %s r%d %s (%s)", turn.toHandle, turn.round, shimmerText("working", m.animFrame, helpStyle, flashNodeStyle), time.Since(turn.since).Round(time.Second))
 			if lipgloss.Width(line) > width-2 {
 				line = line[:width-2]
 			}

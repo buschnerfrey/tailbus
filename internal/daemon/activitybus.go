@@ -160,7 +160,19 @@ func (b *ActivityBus) EmitRoomCreated(roomID, title, createdBy string, members [
 	})
 }
 
-func (b *ActivityBus) EmitRoomMessagePosted(roomID string, roomSeq uint64, from string, members []string, traceID string) {
+func (b *ActivityBus) EmitRoomMessagePosted(
+	roomID string,
+	roomSeq uint64,
+	from string,
+	members []string,
+	traceID string,
+	contentType string,
+	contentKind string,
+	targetHandle string,
+	turnID string,
+	status string,
+	round uint32,
+) {
 	b.RoomMessagesPosted.Add(1)
 	b.Emit(&agentpb.ActivityEvent{
 		Timestamp: timestamppb.Now(),
@@ -171,6 +183,12 @@ func (b *ActivityBus) EmitRoomMessagePosted(roomID string, roomSeq uint64, from 
 				FromHandle:    from,
 				MemberHandles: append([]string(nil), members...),
 				TraceId:       traceID,
+				ContentType:   contentType,
+				ContentKind:   contentKind,
+				TargetHandle:  targetHandle,
+				TurnId:        turnID,
+				Status:        status,
+				Round:         round,
 			},
 		},
 	})

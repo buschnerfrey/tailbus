@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -231,6 +232,7 @@ func (rm *RoomManager) HandleTransportMessage(ctx context.Context, msg *transpor
 	switch body := msg.Body.(type) {
 	case *transportpb.TransportMessage_RoomEvent:
 		if body.RoomEvent != nil {
+			rm.cacheRoomFromEvent(body.RoomEvent)
 			rm.deliverer.DeliverRoomEventLocal(body.RoomEvent)
 		}
 	case *transportpb.TransportMessage_RoomCommand:
@@ -324,6 +326,7 @@ func (rm *RoomManager) handleRemoteCommand(ctx context.Context, cmd *messagepb.R
 }
 
 func (rm *RoomManager) handleRemoteCommandResult(result *messagepb.RoomCommandResult) {
+	rm.cacheRoom(result.Room)
 	rm.mu.Lock()
 	ch := rm.pendingResp[result.RequestId]
 	rm.mu.Unlock()
@@ -486,7 +489,20 @@ func (rm *RoomManager) emitRoomActivity(event *messagepb.RoomEvent) {
 	}
 	switch event.Type {
 	case messagepb.RoomEventType_ROOM_EVENT_TYPE_MESSAGE_POSTED:
-		rm.activity.EmitRoomMessagePosted(event.RoomId, event.RoomSeq, event.SenderHandle, event.Members, event.TraceId)
+		contentKind, targetHandle, turnID, status, round := roomMessageActivityMeta(event)
+		rm.activity.EmitRoomMessagePosted(
+			event.RoomId,
+			event.RoomSeq,
+			event.SenderHandle,
+			event.Members,
+			event.TraceId,
+			event.ContentType,
+			contentKind,
+			targetHandle,
+			turnID,
+			status,
+			round,
+		)
 	case messagepb.RoomEventType_ROOM_EVENT_TYPE_MEMBER_JOINED:
 		rm.activity.EmitRoomMemberJoined(event.RoomId, event.SubjectHandle, event.Members)
 	case messagepb.RoomEventType_ROOM_EVENT_TYPE_MEMBER_LEFT:
@@ -494,6 +510,47 @@ func (rm *RoomManager) emitRoomActivity(event *messagepb.RoomEvent) {
 	case messagepb.RoomEventType_ROOM_EVENT_TYPE_ROOM_CLOSED:
 		rm.activity.EmitRoomClosed(event.RoomId, event.SenderHandle, event.Members)
 	}
+}
+
+func roomMessageActivityMeta(event *messagepb.RoomEvent) (contentKind, targetHandle, turnID, status string, round uint32) {
+	if event == nil || event.ContentType != "application/json" || len(event.Payload) == 0 {
+		return "", "", "", "", 0
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return "", "", "", "", 0
+	}
+
+	contentKind = stringField(payload, "kind")
+	targetHandle = stringField(payload, "target")
+	turnID = stringField(payload, "turn_id")
+	status = stringField(payload, "status")
+	if roundValue, ok := payload["round"]; ok {
+		switch v := roundValue.(type) {
+		case float64:
+			if v >= 0 {
+				round = uint32(v)
+			}
+		case int:
+			if v >= 0 {
+				round = uint32(v)
+			}
+		}
+	}
+	return contentKind, targetHandle, turnID, status, round
+}
+
+func stringField(payload map[string]any, key string) string {
+	value, ok := payload[key]
+	if !ok {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return text
 }
 
 func (rm *RoomManager) publishEvent(event *messagepb.RoomEvent) {
@@ -570,6 +627,57 @@ func (rm *RoomManager) resolveRoomInfo(roomID string) (*messagepb.RoomInfo, erro
 		CreatedAtUnix: info.CreatedAt,
 		UpdatedAtUnix: info.UpdatedAt,
 	}, nil
+}
+
+func (rm *RoomManager) cacheRoomFromEvent(event *messagepb.RoomEvent) {
+	if event == nil || event.RoomId == "" {
+		return
+	}
+	homeNodeID := ""
+	if event.SenderHandle != "" && rm.resolver != nil {
+		if peer, err := rm.resolver.Resolve(event.SenderHandle); err == nil {
+			homeNodeID = peer.NodeID
+		}
+	}
+
+	room, err := rm.store.LoadRoom(event.RoomId)
+	if err != nil {
+		rm.logger.Warn("failed to load cached room", "room_id", event.RoomId, "error", err)
+		return
+	}
+	if room == nil {
+		room = &messagepb.RoomInfo{
+			RoomId:        event.RoomId,
+			HomeNodeId:    homeNodeID,
+			Members:       append([]string(nil), event.Members...),
+			Status:        "open",
+			NextSeq:       event.RoomSeq + 1,
+			CreatedAtUnix: event.SentAtUnix,
+			UpdatedAtUnix: event.SentAtUnix,
+		}
+	} else {
+		if room.HomeNodeId == "" {
+			room.HomeNodeId = homeNodeID
+		}
+		room.Members = append([]string(nil), event.Members...)
+		if room.NextSeq <= event.RoomSeq {
+			room.NextSeq = event.RoomSeq + 1
+		}
+		room.UpdatedAtUnix = event.SentAtUnix
+	}
+	if event.Type == messagepb.RoomEventType_ROOM_EVENT_TYPE_ROOM_CLOSED {
+		room.Status = "closed"
+	}
+	rm.cacheRoom(room)
+}
+
+func (rm *RoomManager) cacheRoom(room *messagepb.RoomInfo) {
+	if room == nil || room.RoomId == "" {
+		return
+	}
+	if err := rm.store.StoreRoom(room); err != nil {
+		rm.logger.Warn("failed to cache room metadata", "room_id", room.RoomId, "error", err)
+	}
 }
 
 func (rm *RoomManager) nodeAddr(nodeID string) (string, error) {
