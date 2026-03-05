@@ -29,6 +29,16 @@ func isLockTimeout(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "timeout")
 }
 
+// isDaemonAlive checks if a daemon is actually listening on the Unix socket.
+func isDaemonAlive(socketPath string) bool {
+	conn, err := net.DialTimeout("unix", socketPath, 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
 // Daemon is the main node daemon that ties together all components.
 type Daemon struct {
 	cfg         *config.DaemonConfig
@@ -83,6 +93,17 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	}
 	dbPath := filepath.Join(dataDir, "messages.db")
 	msgStore, err := NewMessageStore(dbPath, logger)
+	if err != nil && isLockTimeout(err) {
+		// DB is locked — check if the daemon is actually alive by probing the socket.
+		if !isDaemonAlive(cfg.SocketPath) {
+			// Stale lock from a crashed process. Remove the DB and retry.
+			logger.Warn("found stale database lock, recovering", "path", dbPath)
+			if rmErr := os.Remove(dbPath); rmErr != nil {
+				return nil, fmt.Errorf("cannot remove stale database %s: %w", dbPath, rmErr)
+			}
+			msgStore, err = NewMessageStore(dbPath, logger)
+		}
+	}
 	if err != nil {
 		if isLockTimeout(err) {
 			return nil, fmt.Errorf("tailbusd is already running (database %s is locked)\nUse \"tailbus stop\" to stop it first", dbPath)

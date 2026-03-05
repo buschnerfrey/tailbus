@@ -776,6 +776,10 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 		nodeHandles := make(map[string][]string)
 		nodeInfo := make(map[string]*agentpb.PeerStatus)
 		for h, info := range peerMap {
+			// Skip self — local handles are already shown separately
+			if info.NodeID == s.nodeID {
+				continue
+			}
 			if _, ok := nodeInfo[info.NodeID]; !ok {
 				nodeInfo[info.NodeID] = &agentpb.PeerStatus{
 					NodeId:        info.NodeID,
