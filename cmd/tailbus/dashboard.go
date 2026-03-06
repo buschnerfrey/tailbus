@@ -576,20 +576,20 @@ func (m dashboardModel) buildTopoNodes() []topoNode {
 		return nil
 	}
 
-	var nodes []topoNode
-
 	// Local node
 	var localHandles []string
 	for _, h := range m.status.Handles {
 		localHandles = append(localHandles, h.Name)
 	}
 	sort.Strings(localHandles)
-	nodes = append(nodes, topoNode{
+	local := topoNode{
 		id:        m.status.NodeId,
 		handles:   localHandles,
 		connected: true,
 		isLocal:   true,
-	})
+	}
+
+	var peers []topoNode
 
 	// Peer nodes (skip self — already shown as local node)
 	for _, p := range m.status.Peers {
@@ -608,7 +608,7 @@ func (m dashboardModel) buildTopoNodes() []topoNode {
 				connectivity = "offline"
 			}
 		}
-		nodes = append(nodes, topoNode{
+		peers = append(peers, topoNode{
 			id:           p.NodeId,
 			handles:      handles,
 			addr:         p.AdvertiseAddr,
@@ -616,17 +616,27 @@ func (m dashboardModel) buildTopoNodes() []topoNode {
 			connectivity: connectivity,
 		})
 	}
+	sort.Slice(peers, func(i, j int) bool {
+		return peers[i].id < peers[j].id
+	})
 
 	// Relay nodes
+	var relays []topoNode
 	for _, r := range m.status.Relays {
-		nodes = append(nodes, topoNode{
+		relays = append(relays, topoNode{
 			id:        r.NodeId,
 			addr:      r.Addr,
 			connected: r.Connected,
 			isRelay:   true,
 		})
 	}
+	sort.Slice(relays, func(i, j int) bool {
+		return relays[i].id < relays[j].id
+	})
 
+	nodes := []topoNode{local}
+	nodes = append(nodes, peers...)
+	nodes = append(nodes, relays...)
 	return nodes
 }
 
@@ -666,7 +676,12 @@ func (m dashboardModel) detectFlowChains() [][]string {
 	// Build chains from each root via DFS
 	var chains [][]string
 	visited := make(map[string]bool)
+	var sortedRoots []string
 	for root := range roots {
+		sortedRoots = append(sortedRoots, root)
+	}
+	sort.Strings(sortedRoots)
+	for _, root := range sortedRoots {
 		chain := []string{root}
 		current := root
 		visited[current] = true
@@ -1162,7 +1177,11 @@ func (m dashboardModel) renderDetailView(width int) string {
 		return b.String()
 	}
 
-	for _, p := range m.status.Peers {
+	peers := append([]*agentpb.PeerStatus(nil), m.status.Peers...)
+	sort.Slice(peers, func(i, j int) bool {
+		return peers[i].NodeId < peers[j].NodeId
+	})
+	for _, p := range peers {
 		connectivity := p.Connectivity
 		if connectivity == "" {
 			if p.Connected {
@@ -1194,7 +1213,11 @@ func (m dashboardModel) renderDetailView(width int) string {
 		}
 	}
 
-	for _, r := range m.status.Relays {
+	relays := append([]*agentpb.RelayStatus(nil), m.status.Relays...)
+	sort.Slice(relays, func(i, j int) bool {
+		return relays[i].NodeId < relays[j].NodeId
+	})
+	for _, r := range relays {
 		status := disconnectedNodeStyle.Render("[disconnected]")
 		if r.Connected {
 			status = relayNodeStyle.Render("[connected]")

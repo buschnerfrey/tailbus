@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"reflect"
 	"testing"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
@@ -117,5 +118,42 @@ func TestDashboardResubscribesAfterActivityDisconnect(t *testing.T) {
 	}
 	if client.watchCalls != 1 {
 		t.Fatalf("expected one watch attempt, got %d", client.watchCalls)
+	}
+}
+
+func TestBuildTopoNodesSortsPeersAndRelaysStably(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+	model.status = &agentpb.GetNodeStatusResponse{
+		NodeId: "support-node",
+		Handles: []*agentpb.HandleInfo{
+			{Name: "support-triage"},
+			{Name: "incident-orchestrator"},
+		},
+		Peers: []*agentpb.PeerStatus{
+			{NodeId: "ops-node", Handles: []string{"release-agent", "logs-agent"}},
+			{NodeId: "finance-node", Handles: []string{"billing-agent"}},
+		},
+		Relays: []*agentpb.RelayStatus{
+			{NodeId: "z-relay"},
+			{NodeId: "a-relay"},
+		},
+	}
+
+	nodes := model.buildTopoNodes()
+	gotIDs := make([]string, len(nodes))
+	for i, node := range nodes {
+		gotIDs[i] = node.id
+	}
+
+	wantIDs := []string{"support-node", "finance-node", "ops-node", "a-relay", "z-relay"}
+	if !reflect.DeepEqual(gotIDs, wantIDs) {
+		t.Fatalf("unexpected node order: got %v want %v", gotIDs, wantIDs)
+	}
+
+	if !reflect.DeepEqual(nodes[0].handles, []string{"incident-orchestrator", "support-triage"}) {
+		t.Fatalf("expected local handles to be sorted, got %v", nodes[0].handles)
+	}
+	if !reflect.DeepEqual(nodes[2].handles, []string{"logs-agent", "release-agent"}) {
+		t.Fatalf("expected peer handles to be sorted, got %v", nodes[2].handles)
 	}
 }
