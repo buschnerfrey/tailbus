@@ -20,7 +20,7 @@ from dev_task_common import (
     TURN_PROGRESS_INTERVAL,
     RESET,
     YELLOW,
-    llm_call,
+    llm_stream_call,
     parse_json,
     parse_json_object,
     progress_pinger,
@@ -67,6 +67,7 @@ seen_turns: set[str] = set()
 
 
 async def review_turn(room_id: str, payload: dict[str, object]) -> dict[str, object]:
+    progress_state = payload.get("_progress_state")
     events = await replay_room_with_retry(agent, room_id)
     task = room_task_from_events(events)
     user_prompt = (
@@ -75,8 +76,13 @@ async def review_turn(room_id: str, payload: dict[str, object]) -> dict[str, obj
         f"Proposed change set:\n{json.dumps(payload.get('change_set', {}), indent=2)}\n"
     )
     started = time.monotonic()
-    loop = asyncio.get_running_loop()
-    raw = (await loop.run_in_executor(None, llm_call, SYSTEM_PROMPT, user_prompt)).strip()
+    def on_chunk(text: str) -> None:
+        if isinstance(progress_state, dict):
+            cleaned = " ".join(text.strip().split())
+            if cleaned:
+                progress_state["summary"] = f"Critic streaming: {cleaned[-120:]}"
+
+    raw = (await asyncio.to_thread(llm_stream_call, SYSTEM_PROMPT, user_prompt, on_chunk=on_chunk)).strip()
     elapsed = round(time.monotonic() - started, 1)
     if raw.startswith("[LLM error]"):
         return {
@@ -135,6 +141,7 @@ async def handle(msg: RoomEvent) -> None:
         return
     seen_turns.add(turn_id)
     say(agent.handle, f"reviewing via {BOLD}{LLM_BASE_URL}{RESET}")
+    progress_state = {"summary": "Critic started streaming review output."}
     progress_task = asyncio.create_task(
         progress_pinger(
             agent,
@@ -143,11 +150,12 @@ async def handle(msg: RoomEvent) -> None:
             round_no=int(payload.get("round", 0)),
             target_handle=agent.handle,
             target_capability="dev.review",
-            summary="Critic is still reviewing the change set.",
+            summary=lambda: str(progress_state["summary"]),
             interval=TURN_PROGRESS_INTERVAL,
         )
     )
     try:
+        payload["_progress_state"] = progress_state
         reply = await review_turn(msg.room_id, payload)
     except Exception as exc:
         reply = {

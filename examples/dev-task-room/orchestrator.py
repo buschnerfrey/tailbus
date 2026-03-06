@@ -71,7 +71,7 @@ agent = AsyncAgent(
     socket=os.environ.get("TAILBUS_SOCKET", "/tmp/tailbusd.sock"),
 )
 
-pending_turns: dict[str, tuple[asyncio.Future[dict[str, Any]], str]] = {}
+pending_turns: dict[str, dict[str, Any]] = {}
 
 
 def short(text: str, limit: int = 92) -> str:
@@ -100,10 +100,16 @@ async def handle_room_event(event: RoomEvent) -> None:
     pending = pending_turns.get(turn_id)
     if pending is None:
         return
-    future, expected_kind = pending
+    future = pending["future"]
+    expected_kind = pending["expected_kind"]
     if future.done():
         return
-    if str(payload.get("kind", "")) != expected_kind:
+    kind = str(payload.get("kind", ""))
+    if kind == "turn_progress":
+        pending["last_progress"] = time.monotonic()
+        pending["last_summary"] = str(payload.get("summary", "working"))
+        return
+    if kind != expected_kind:
         return
     future.set_result(payload)
 
@@ -171,12 +177,30 @@ async def request_turn(
     if extra:
         payload.update(extra)
     future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
-    pending_turns[turn_id] = (future, expected_reply_kind(kind))
+    pending_turns[turn_id] = {
+        "future": future,
+        "expected_kind": expected_reply_kind(kind),
+        "last_progress": time.monotonic(),
+        "last_summary": "working",
+    }
     await post_room(room_id, payload)
     say(agent.handle, f"{CYAN}→{RESET} @{target_handle} [{target_capability}]")
     say(agent.handle, f"   {DIM}{short(instruction)}{RESET}")
     try:
-        reply = await asyncio.wait_for(future, timeout=TURN_TIMEOUT)
+        while True:
+            pending = pending_turns[turn_id]
+            idle_for = time.monotonic() - float(pending["last_progress"])
+            remaining = TURN_TIMEOUT - idle_for
+            if remaining <= 0:
+                raise asyncio.TimeoutError
+            try:
+                reply = await asyncio.wait_for(future, timeout=min(remaining, 5.0))
+                break
+            except asyncio.TimeoutError:
+                if future.done():
+                    reply = future.result()
+                    break
+                continue
         if reply.get("status") == "ok":
             say(agent.handle, f"{GREEN}←{RESET} @{target_handle} ({reply.get('elapsed_sec', 0):.1f}s)")
         else:
@@ -197,14 +221,16 @@ async def request_turn(
             },
         )
         say(agent.handle, f"{RED}timeout{RESET} waiting for @{target_handle}")
+        pending = pending_turns.get(turn_id, {})
+        last_summary = str(pending.get("last_summary", "working"))
         return {
             "kind": expected_reply_kind(kind),
             "turn_id": turn_id,
             "author": target_handle,
             "status": "timeout",
             "capability": target_capability,
-            "summary": "",
-            "error": f"Timed out after {TURN_TIMEOUT:.0f}s",
+            "summary": last_summary,
+            "error": f"Timed out after {TURN_TIMEOUT:.0f}s without progress",
             "elapsed_sec": TURN_TIMEOUT,
         }
     finally:

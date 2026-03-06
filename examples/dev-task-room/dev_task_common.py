@@ -12,7 +12,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 sys_path = os.path.join(os.path.dirname(__file__), "../../sdk/python/src")
 if sys_path not in os.sys.path:
@@ -160,6 +160,70 @@ def llm_call(system: str, user: str, *, temperature: float = 0.2, max_tokens: in
                 parts = content.split("</think>")
                 content = parts[-1].strip() if len(parts) > 1 else content
             return content
+    except urllib.error.URLError as exc:
+        return f"[LLM error] Could not reach LM Studio at {LLM_BASE_URL}: {exc.reason}"
+    except Exception as exc:  # pragma: no cover - defensive example code
+        return f"[LLM error] {exc}"
+
+
+def llm_stream_call(
+    system: str,
+    user: str,
+    *,
+    on_chunk: Callable[[str], None] | None = None,
+    temperature: float = 0.2,
+    max_tokens: int = 4096,
+) -> str:
+    body: dict[str, Any] = {
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    if LLM_MODEL:
+        body["model"] = LLM_MODEL
+
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        f"{LLM_BASE_URL}/chat/completions",
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    chunks: list[str] = []
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="ignore").strip()
+                if not line or not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    event = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                choices = event.get("choices", [])
+                if not choices:
+                    continue
+                choice = choices[0]
+                delta = choice.get("delta", {})
+                text = ""
+                if isinstance(delta, dict):
+                    text = str(delta.get("content", "") or "")
+                if not text and "message" in choice:
+                    message = choice.get("message", {})
+                    if isinstance(message, dict):
+                        text = str(message.get("content", "") or "")
+                if not text:
+                    continue
+                chunks.append(text)
+                if on_chunk is not None:
+                    on_chunk("".join(chunks))
+        return "".join(chunks)
     except urllib.error.URLError as exc:
         return f"[LLM error] Could not reach LM Studio at {LLM_BASE_URL}: {exc.reason}"
     except Exception as exc:  # pragma: no cover - defensive example code
@@ -340,7 +404,7 @@ async def progress_pinger(
     round_no: int,
     target_handle: str,
     target_capability: str,
-    summary: str,
+    summary: str | Callable[[], str],
     interval: float = TURN_PROGRESS_INTERVAL,
 ) -> None:
     elapsed = 0.0
@@ -355,7 +419,7 @@ async def progress_pinger(
             "target_handle": target_handle,
             "target_capability": target_capability,
             "status": "working",
-            "summary": summary,
+            "summary": summary() if callable(summary) else summary,
             "elapsed_sec": round(elapsed, 1),
         }
         await agent.post_room_message(
