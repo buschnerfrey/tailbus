@@ -2,10 +2,11 @@
 
 ## Where we are today
 
-Working MVP with real security, NAT traversal, persistence, MCP integration, and first-class shared collaboration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 6 collaboration:** daemon-managed shared rooms with ordered replay, room-aware dashboard activity, and a room-based pair-solver example. **Phase 8 teams:** Team-based isolation — teams as the core multi-tenancy unit; team-scoped peer maps, handle lookup, and registration; invite codes for onboarding; CLI team management commands; REST API + browser OAuth + web dashboard at `tailbus.co/dashboard`. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands. **Cloud deployment:** `tailbus-coord` on Fly.io at `coord.tailbus.co` with embedded relay on port 7443; any machine can join with `tailbus login && tailbusd` and gets NAT traversal for free.
+Working MVP with real security, NAT traversal, persistence, MCP integration, and first-class shared collaboration: coord server + node daemons + P2P gRPC transport + relay server + CLI + TUI dashboard + Prometheus metrics + distributed tracing + stdio bridge + MCP gateway + Docker Compose. Tailbus is strongest as the communication and control plane between heterogeneous agent systems, not as a replacement for agent runtimes or workflow frameworks. **Phase 1 hardening complete:** mTLS on all connections (P2P, relay, and coord), per-connection handle ownership on the Unix socket, Unix socket token auth, coord admission control (pre-auth tokens + OAuth/JWT), per-session sequence numbers, and delivery ACKs with retry. **Phase 2 reliability:** message persistence via bbolt — sessions and pending messages survive daemon restarts. **Phase 3 NAT traversal:** DERP-style relay server enables message delivery across NAT boundaries. **Phase 4 SDKs:** Python SDK (async/sync, zero deps) wrapping the stdio bridge. **Phase 5 protocol bridges:** MCP gateway exposes handles as MCP tools — any MCP-compatible LLM can use tailbus agents. **Phase 6 collaboration:** daemon-managed shared rooms with ordered replay, room-aware dashboard activity, and a room-based pair-solver example. **Phase 8 teams:** Team-based isolation — teams as the core multi-tenancy unit; team-scoped peer maps, handle lookup, and registration; invite codes for onboarding; CLI team management commands; REST API + browser OAuth + web dashboard at `tailbus.co/dashboard`. **Phase 9 observability:** Web chat UI embedded in daemon binary for browser-based agent interaction. **Phase 10 deployment:** Docker Compose with full mesh + web UI + LLM agents; multi-agent LLM collaboration example (researcher/critic/writer pipeline); cross-network deployment templates for multi-machine meshes. **OAuth login:** Device Authorization Grant (RFC 8628) for Tailscale-style `install → login → connected` UX; Google OIDC; JWT tokens with auto-refresh; `tailbus login/logout/status` CLI commands. **Cloud deployment:** `tailbus-coord` on Fly.io at `coord.tailbus.co` with embedded relay on port 7443; any machine can join with `tailbus login && tailbusd` and gets NAT traversal for free.
 
 **What works:**
 - Agents register handles, open sessions, exchange messages, resolve conversations
+- Heterogeneous agents can collaborate across languages, machines, and department boundaries through one mesh
 - All daemon-to-daemon traffic is mTLS with Ed25519 peer verification against the peer map
 - All daemon-to-coord traffic is mTLS with TOFU cert pinning
 - DERP-style relay server for NAT traversal — daemons try direct P2P first, fall back to relay transparently; relay embedded in coord server by default (also works standalone)
@@ -36,6 +37,27 @@ Working MVP with real security, NAT traversal, persistence, MCP integration, and
 - No federation — `name@domain` is parsed but routing is single-coord only
 - CLI missing `--version`, `--json` output, and shell completions
 - ~~No OIDC/SSO identity — nodes authenticate with keypairs, not corporate IdPs~~ ✓ OAuth login with Google OIDC; JWT tokens; device authorization flow
+
+---
+
+## Core product boundary
+
+Tailbus is for:
+
+- heterogeneous agents
+- different machines and networks
+- different departments and ownership boundaries
+- different runtimes and languages
+- shared identity, routing, rooms, policies, and observability
+
+Tailbus is not:
+
+- an agent reasoning framework
+- a workflow DSL
+- a memory layer
+- a replacement for LangGraph, CrewAI, Jido, or similar runtimes
+
+The product gap Tailbus addresses is the layer between those systems: the networked communication and control plane that lets independently running agent systems collaborate safely across boundaries.
 
 ---
 

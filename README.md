@@ -1,10 +1,10 @@
 <p align="center">
   <h1 align="center">tailbus</h1>
   <p align="center">
-    <strong>Make your agents reachable from anywhere.</strong>
+    <strong>The communication plane for agents across runtimes, machines, and teams.</strong>
     <br />
-    Spin up any process — a Python script, an LLM pipeline, a data service — give it a name,
-    and it's instantly discoverable by every other agent you're running.
+    Connect heterogeneous agents running in different languages, on different machines, for different departments,
+    and give them shared identity, routing, rooms, policies, and observability.
   </p>
   <p align="center">
     <a href="https://github.com/alexanderfrey/tailbus/releases"><img src="https://img.shields.io/github/v/release/alexanderfrey/tailbus?style=flat-square&color=blue" alt="Release" /></a>
@@ -39,7 +39,7 @@
                Claude / Cursor
 ```
 
-**Tailscale-style topology for AI agents.** Central coordination for discovery, peer-to-peer gRPC for data. No port forwarding, no YAML, no reverse proxies — agents register handles and talk to each other across machines, NATs, and cloud VPCs automatically.
+**Tailscale-style topology for AI agents.** Tailbus is the communication and control plane between agent systems, not a replacement for your runtime or workflow framework. Central coordination for discovery, peer-to-peer gRPC for data. No port forwarding, no YAML, no reverse proxies — agents register handles and talk to each other across machines, NATs, and cloud VPCs automatically.
 
 ## Quick Start
 
@@ -84,6 +84,21 @@ Each has a point solution — Tailscale for networking, A2A for protocol, OAuth 
 
 Tailbus handles all four with one install.
 
+What Tailbus is for:
+
+- heterogeneous agents
+- different machines and networks
+- different departments and teams
+- different runtimes and languages
+- shared identity, routing, rooms, policies, and observability
+
+What Tailbus is not:
+
+- not another agent reasoning framework
+- not a workflow DSL
+- not a replacement for LangGraph, CrewAI, Jido, or similar runtimes
+- the layer that connects those systems when they need to collaborate across boundaries
+
 ---
 
 ## Features
@@ -91,9 +106,11 @@ Tailbus handles all four with one install.
 ### Core
 
 - **Handle-based addressing** — agents register names like `marketing` or `finance` and message each other without knowing machines, IPs, or endpoints
+- **Heterogeneous by design** — Python scripts, MCP tools, CLI bridges, LLM pipelines, and services in other runtimes can all participate on the same mesh
 - **@-mention auto-routing** — when a message contains `@handle`, the daemon auto-opens a session to that agent, wherever it lives; agents recruit each other mid-conversation
 - **Structured sessions** — open, exchange messages across multiple turns, and resolve when done; not fire-and-forget API calls
 - **Shared rooms** — daemon-managed multi-party conversations with ordered room events, replay, and membership, built above the 1:1 session transport
+- **Department-scale topology** — teams, policies, and room/session semantics are designed for agents owned by different groups, not just one app process
 - **P2P data plane** — messages flow directly between daemons via bidirectional gRPC streams, never through the coord server
 - **NAT traversal** — DERP-style relay with direct connection upgrade; agents behind home NATs, corporate firewalls, or private VPCs connect without port forwarding
 - **mTLS everywhere** — all connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
