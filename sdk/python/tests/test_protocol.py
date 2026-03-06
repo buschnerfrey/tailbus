@@ -8,6 +8,7 @@ from tailbus._protocol import (
     Error,
     HandleEntry,
     HandleList,
+    HandleMatches,
     Introspected,
     Manifest,
     Message,
@@ -291,6 +292,33 @@ class TestParseHandles(unittest.TestCase):
         resp = parse_response('{"type":"handles","entries":[]}')
         assert isinstance(resp, HandleList)
         self.assertEqual(len(resp.entries), 0)
+
+
+class TestParseHandleMatches(unittest.TestCase):
+    def test_parse(self) -> None:
+        line = json.dumps(
+            {
+                "type": "handle_matches",
+                "matches": [
+                    {
+                        "handle": "solver",
+                        "score": 160,
+                        "match_reasons": ["capability:code.solve", "command:solve"],
+                        "manifest": {"description": "Code solver"},
+                    }
+                ],
+            }
+        )
+        resp = parse_response(line)
+        self.assertIsInstance(resp, HandleMatches)
+        assert isinstance(resp, HandleMatches)
+        self.assertEqual(len(resp.matches), 1)
+        self.assertEqual(resp.matches[0].handle, "solver")
+        self.assertEqual(resp.matches[0].score, 160)
+        self.assertEqual(
+            resp.matches[0].match_reasons,
+            ("capability:code.solve", "command:solve"),
+        )
 
 
 class TestParseSessions(unittest.TestCase):

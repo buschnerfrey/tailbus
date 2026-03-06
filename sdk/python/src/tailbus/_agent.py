@@ -18,6 +18,8 @@ from ._protocol import (
     Error,
     HandleEntry,
     HandleList,
+    HandleMatch,
+    HandleMatches,
     Introspected,
     Manifest,
     Message,
@@ -236,6 +238,34 @@ class AsyncAgent:
         resp = await self._send_command(cmd)
         assert isinstance(resp, HandleList)
         return list(resp.entries)
+
+    async def find_handles(
+        self,
+        *,
+        capabilities: list[str] | None = None,
+        domains: list[str] | None = None,
+        tags: list[str] | None = None,
+        command_name: str = "",
+        version: str = "",
+        limit: int = 0,
+    ) -> list[HandleMatch]:
+        """Find ranked handles matching structured discovery constraints."""
+        cmd: dict[str, Any] = {"type": "find"}
+        if capabilities:
+            cmd["capabilities"] = capabilities
+        if domains:
+            cmd["domains"] = domains
+        if tags:
+            cmd["tags"] = tags
+        if command_name:
+            cmd["command_name"] = command_name
+        if version:
+            cmd["version"] = version
+        if limit > 0:
+            cmd["limit"] = limit
+        resp = await self._send_command(cmd)
+        assert isinstance(resp, HandleMatches)
+        return list(resp.matches)
 
     async def list_sessions(self) -> list[SessionInfo]:
         """List active sessions for this agent."""

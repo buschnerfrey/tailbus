@@ -11,6 +11,7 @@ service AgentAPI {
   rpc Register(RegisterRequest) returns (RegisterResponse);
   rpc IntrospectHandle(IntrospectHandleRequest) returns (IntrospectHandleResponse);
   rpc ListHandles(ListHandlesRequest) returns (ListHandlesResponse);
+  rpc FindHandles(FindHandlesRequest) returns (FindHandlesResponse);
   rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
   rpc Subscribe(SubscribeRequest) returns (stream IncomingMessage);
@@ -63,6 +64,26 @@ message ListHandlesResponse {
 message HandleEntry {
   string handle = 1;
   ServiceManifest manifest = 2;
+}
+
+message FindHandlesRequest {
+  repeated string capabilities = 1;
+  repeated string domains = 2;
+  repeated string tags = 3;
+  string command_name = 4;
+  string version = 5;
+  uint32 limit = 6;
+}
+
+message FindHandlesResponse {
+  repeated HandleMatch matches = 1;
+}
+
+message HandleMatch {
+  string handle = 1;
+  ServiceManifest manifest = 2;
+  int32 score = 3;
+  repeated string match_reasons = 4;
 }
 
 message OpenSessionRequest {

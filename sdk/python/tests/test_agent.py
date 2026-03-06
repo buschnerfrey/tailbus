@@ -347,6 +347,41 @@ class TestDiscovery(AsyncAgentTestCase):
 
         asyncio.run(run())
 
+    def test_find_handles(self) -> None:
+        async def run() -> None:
+            agent = AsyncAgent("test-agent")
+            await agent.start()
+            try:
+                self._queue(
+                    {
+                        "type": "handle_matches",
+                        "matches": [
+                            {
+                                "handle": "solver",
+                                "score": 160,
+                                "match_reasons": ["capability:code.solve", "command:solve"],
+                            }
+                        ],
+                    }
+                )
+                result = await agent.find_handles(
+                    capabilities=["code.solve"],
+                    command_name="solve",
+                    limit=1,
+                )
+                self.assertEqual(len(result), 1)
+                self.assertEqual(result[0].handle, "solver")
+                self.assertEqual(result[0].score, 160)
+                cmd = json.loads(self.fake_process.stdin.written[-1])
+                self.assertEqual(cmd["type"], "find")
+                self.assertEqual(cmd["capabilities"], ["code.solve"])
+                self.assertEqual(cmd["command_name"], "solve")
+                self.assertEqual(cmd["limit"], 1)
+            finally:
+                await agent.close()
+
+        asyncio.run(run())
+
     def test_list_sessions(self) -> None:
         async def run() -> None:
             agent = AsyncAgent("test-agent")

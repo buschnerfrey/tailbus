@@ -25,6 +25,8 @@ __all__ = [
     "Introspected",
     "HandleEntry",
     "HandleList",
+    "HandleMatch",
+    "HandleMatches",
     "SessionInfo",
     "SessionList",
     "Error",
@@ -245,6 +247,23 @@ class HandleList:
 
 
 @dataclass(frozen=True, slots=True)
+class HandleMatch:
+    """A ranked discovery match."""
+
+    handle: str
+    manifest: Manifest | None = None
+    score: int = 0
+    match_reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class HandleMatches:
+    """Ranked discovery matches."""
+
+    matches: tuple[HandleMatch, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class SessionInfo:
     """Information about an active session."""
 
@@ -285,6 +304,7 @@ Response = Union[
     RoomOpResult,
     Introspected,
     HandleList,
+    HandleMatches,
     SessionList,
     Error,
 ]
@@ -433,6 +453,20 @@ def _parse_handles(d: dict[str, Any]) -> HandleList:
         for e in d.get("entries", [])
     )
     return HandleList(entries=entries)
+
+
+@_register_parser("handle_matches")
+def _parse_handle_matches(d: dict[str, Any]) -> HandleMatches:
+    matches = tuple(
+        HandleMatch(
+            handle=e["handle"],
+            manifest=Manifest.from_dict(e.get("manifest")),
+            score=e.get("score", 0),
+            match_reasons=tuple(e.get("match_reasons", [])),
+        )
+        for e in d.get("matches", [])
+    )
+    return HandleMatches(matches=matches)
 
 
 @_register_parser("sessions")

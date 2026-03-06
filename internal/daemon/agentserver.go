@@ -1183,6 +1183,51 @@ func (s *AgentServer) ListHandles(_ context.Context, req *agentpb.ListHandlesReq
 	return &agentpb.ListHandlesResponse{Entries: entries}, nil
 }
 
+// FindHandles returns ranked handles matching structured discovery constraints.
+func (s *AgentServer) FindHandles(_ context.Context, req *agentpb.FindHandlesRequest) (*agentpb.FindHandlesResponse, error) {
+	entries := make(map[string]handle.ServiceManifest)
+
+	s.mu.RLock()
+	for h := range s.handles {
+		entries[h] = protoToHandleManifest(s.manifests[h])
+	}
+	s.mu.RUnlock()
+
+	if s.dashResolver != nil {
+		for _, match := range s.dashResolver.FindHandles(handle.FindQuery{
+			Capabilities: req.Capabilities,
+			Domains:      req.Domains,
+			Tags:         req.Tags,
+			CommandName:  req.CommandName,
+			Version:      req.Version,
+		}) {
+			if _, exists := entries[match.Handle]; exists {
+				continue
+			}
+			entries[match.Handle] = match.Manifest
+		}
+	}
+
+	matches := handle.FindMatches(entries, handle.FindQuery{
+		Capabilities: req.Capabilities,
+		Domains:      req.Domains,
+		Tags:         req.Tags,
+		CommandName:  req.CommandName,
+		Version:      req.Version,
+		Limit:        int(req.Limit),
+	})
+	resp := make([]*agentpb.HandleMatch, 0, len(matches))
+	for _, match := range matches {
+		resp = append(resp, &agentpb.HandleMatch{
+			Handle:       match.Handle,
+			Manifest:     handleManifestToProto(match.Manifest),
+			Score:        int32(match.Score),
+			MatchReasons: match.MatchReasons,
+		})
+	}
+	return &agentpb.FindHandlesResponse{Matches: resp}, nil
+}
+
 // matchesTagsProto checks if a protobuf manifest's tags match the required tags.
 func matchesTagsProto(m *messagepb.ServiceManifest, required []string) bool {
 	if len(required) == 0 {

@@ -9,6 +9,7 @@ from typing import Any, Callable
 from ._agent import AsyncAgent
 from ._protocol import (
     HandleEntry,
+    HandleMatch,
     Introspected,
     Manifest,
     Message,
@@ -171,6 +172,29 @@ class SyncAgent:
         """List registered handles."""
         assert self._async_agent is not None
         return self._run(self._async_agent.list_handles(tags=tags))
+
+    def find_handles(
+        self,
+        *,
+        capabilities: list[str] | None = None,
+        domains: list[str] | None = None,
+        tags: list[str] | None = None,
+        command_name: str = "",
+        version: str = "",
+        limit: int = 0,
+    ) -> list[HandleMatch]:
+        """Find ranked handles matching structured discovery constraints."""
+        assert self._async_agent is not None
+        return self._run(
+            self._async_agent.find_handles(
+                capabilities=capabilities,
+                domains=domains,
+                tags=tags,
+                command_name=command_name,
+                version=version,
+                limit=limit,
+            )
+        )
 
     def list_sessions(self) -> list[SessionInfo]:
         """List active sessions."""

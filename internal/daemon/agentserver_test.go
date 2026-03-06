@@ -284,3 +284,52 @@ func TestGetNodeStatusIncludesRooms(t *testing.T) {
 		t.Fatalf("room id = %q, want room-1", statusResp.Rooms[0].RoomId)
 	}
 }
+
+func TestFindHandlesMergesLocalAndRemote(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	srv := NewAgentServer(session.NewStore(), nil, NewActivityBus(), logger)
+	resolver := handle.NewResolver()
+	resolver.UpdatePeerMap(map[string]handle.PeerInfo{
+		"remote-solver": {
+			Manifest: handle.ServiceManifest{
+				Description:  "Remote solver",
+				Capabilities: []string{"code.solve"},
+				Domains:      []string{"engineering"},
+				Tags:         []string{"deep"},
+				Commands:     []handle.CommandSpec{{Name: "solve"}},
+			},
+		},
+	})
+	srv.SetDashboardDeps("test-node", resolver, nil)
+
+	srv.mu.Lock()
+	srv.handles["local-solver"] = true
+	srv.manifests["local-solver"] = &messagepb.ServiceManifest{
+		Description:  "Local solver",
+		Capabilities: []string{"code.solve"},
+		Domains:      []string{"engineering"},
+		Tags:         []string{"fast"},
+		Commands: []*messagepb.CommandSpec{
+			{Name: "solve"},
+		},
+	}
+	srv.mu.Unlock()
+
+	resp, err := srv.FindHandles(context.Background(), &agentpb.FindHandlesRequest{
+		Capabilities: []string{"code.solve"},
+		Domains:      []string{"engineering"},
+		CommandName:  "solve",
+	})
+	if err != nil {
+		t.Fatalf("FindHandles returned error: %v", err)
+	}
+	if len(resp.Matches) != 2 {
+		t.Fatalf("expected 2 matches, got %d", len(resp.Matches))
+	}
+	if resp.Matches[0].Handle != "local-solver" {
+		t.Fatalf("expected local-solver first, got %s", resp.Matches[0].Handle)
+	}
+	if resp.Matches[1].Handle != "remote-solver" {
+		t.Fatalf("expected remote-solver second, got %s", resp.Matches[1].Handle)
+	}
+}

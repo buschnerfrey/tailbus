@@ -33,20 +33,25 @@ type manifestCmd struct {
 }
 
 type inboundCmd struct {
-	Type        string       `json:"type"`
-	Handle      string       `json:"handle,omitempty"`
-	Description string       `json:"description,omitempty"` // deprecated, use manifest
-	Manifest    *manifestCmd `json:"manifest,omitempty"`
-	Tags        []string     `json:"tags,omitempty"` // for list command
-	To          string       `json:"to,omitempty"`
-	Session     string       `json:"session,omitempty"`
-	RoomID      string       `json:"room_id,omitempty"`
-	Title       string       `json:"title,omitempty"`
-	Members     []string     `json:"members,omitempty"`
-	SinceSeq    uint64       `json:"since_seq,omitempty"`
-	Payload     string       `json:"payload,omitempty"`
-	ContentType string       `json:"content_type,omitempty"`
-	TraceID     string       `json:"trace_id,omitempty"`
+	Type         string       `json:"type"`
+	Handle       string       `json:"handle,omitempty"`
+	Description  string       `json:"description,omitempty"` // deprecated, use manifest
+	Manifest     *manifestCmd `json:"manifest,omitempty"`
+	Capabilities []string     `json:"capabilities,omitempty"`
+	Domains      []string     `json:"domains,omitempty"`
+	Tags         []string     `json:"tags,omitempty"` // for list command
+	CommandName  string       `json:"command_name,omitempty"`
+	Version      string       `json:"version,omitempty"`
+	Limit        uint32       `json:"limit,omitempty"`
+	To           string       `json:"to,omitempty"`
+	Session      string       `json:"session,omitempty"`
+	RoomID       string       `json:"room_id,omitempty"`
+	Title        string       `json:"title,omitempty"`
+	Members      []string     `json:"members,omitempty"`
+	SinceSeq     uint64       `json:"since_seq,omitempty"`
+	Payload      string       `json:"payload,omitempty"`
+	ContentType  string       `json:"content_type,omitempty"`
+	TraceID      string       `json:"trace_id,omitempty"`
 }
 
 // Outbound response types (stdout)
@@ -99,6 +104,18 @@ type listEntry struct {
 type listResp struct {
 	Type    string      `json:"type"`
 	Entries []listEntry `json:"entries"`
+}
+
+type matchEntry struct {
+	Handle       string                  `json:"handle"`
+	Manifest     *introspectManifestResp `json:"manifest,omitempty"`
+	Score        int32                   `json:"score"`
+	MatchReasons []string                `json:"match_reasons,omitempty"`
+}
+
+type matchesResp struct {
+	Type    string       `json:"type"`
+	Matches []matchEntry `json:"matches"`
 }
 
 type messageResp struct {
@@ -657,6 +674,30 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					})
 				}
 				w.Write(listResp{Type: "handles", Entries: entries})
+
+			case "find":
+				resp, err := client.FindHandles(ctx, &agentpb.FindHandlesRequest{
+					Capabilities: cmd.Capabilities,
+					Domains:      cmd.Domains,
+					Tags:         cmd.Tags,
+					CommandName:  cmd.CommandName,
+					Version:      cmd.Version,
+					Limit:        cmd.Limit,
+				})
+				if err != nil {
+					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "find"})
+					continue
+				}
+				matches := make([]matchEntry, 0, len(resp.Matches))
+				for _, match := range resp.Matches {
+					matches = append(matches, matchEntry{
+						Handle:       match.Handle,
+						Manifest:     protoManifestToResp(match.Manifest),
+						Score:        match.Score,
+						MatchReasons: match.MatchReasons,
+					})
+				}
+				w.Write(matchesResp{Type: "handle_matches", Matches: matches})
 
 			// Keep backward compat: "describe" maps to "introspect"
 			case "describe":

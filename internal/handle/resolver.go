@@ -2,6 +2,7 @@ package handle
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -57,6 +58,24 @@ type RoomInfo struct {
 	NextSeq    uint64
 	CreatedAt  int64
 	UpdatedAt  int64
+}
+
+// FindQuery describes structured discovery constraints.
+type FindQuery struct {
+	Capabilities []string
+	Domains      []string
+	Tags         []string
+	CommandName  string
+	Version      string
+	Limit        int
+}
+
+// HandleMatch is a ranked discovery result.
+type HandleMatch struct {
+	Handle       string
+	Manifest     ServiceManifest
+	Score        int
+	MatchReasons []string
 }
 
 // Resolver resolves handle names to peer info using a cached peer map.
@@ -196,20 +215,113 @@ func (r *Resolver) ListHandlesByTags(tags []string) map[string]ServiceManifest {
 	return result
 }
 
+// FindHandles returns ranked handles matching the structured discovery query.
+func (r *Resolver) FindHandles(query FindQuery) []HandleMatch {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	entries := make(map[string]ServiceManifest, len(r.handleTo))
+	for handle, info := range r.handleTo {
+		entries[handle] = info.Manifest
+	}
+	return FindMatches(entries, query)
+}
+
+// FindMatches ranks a manifest set against a structured discovery query.
+func FindMatches(entries map[string]ServiceManifest, query FindQuery) []HandleMatch {
+	var matches []HandleMatch
+	for handle, manifest := range entries {
+		match, ok := evaluateMatch(handle, manifest, query)
+		if !ok {
+			continue
+		}
+		matches = append(matches, match)
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].Score != matches[j].Score {
+			return matches[i].Score > matches[j].Score
+		}
+		return matches[i].Handle < matches[j].Handle
+	})
+	if query.Limit > 0 && len(matches) > query.Limit {
+		return matches[:query.Limit]
+	}
+	return matches
+}
+
+func evaluateMatch(handle string, manifest ServiceManifest, query FindQuery) (HandleMatch, bool) {
+	match := HandleMatch{Handle: handle, Manifest: manifest}
+
+	if !containsAll(manifest.Capabilities, query.Capabilities) {
+		return HandleMatch{}, false
+	}
+	for _, capability := range query.Capabilities {
+		match.Score += 100
+		match.MatchReasons = append(match.MatchReasons, "capability:"+capability)
+	}
+
+	if !containsAll(manifest.Domains, query.Domains) {
+		return HandleMatch{}, false
+	}
+	for _, domain := range query.Domains {
+		match.Score += 30
+		match.MatchReasons = append(match.MatchReasons, "domain:"+domain)
+	}
+
+	if !containsAll(manifest.Tags, query.Tags) {
+		return HandleMatch{}, false
+	}
+	for _, tag := range query.Tags {
+		match.Score += 10
+		match.MatchReasons = append(match.MatchReasons, "tag:"+tag)
+	}
+
+	if query.CommandName != "" {
+		if !hasCommand(manifest.Commands, query.CommandName) {
+			return HandleMatch{}, false
+		}
+		match.Score += 20
+		match.MatchReasons = append(match.MatchReasons, "command:"+query.CommandName)
+	}
+
+	if query.Version != "" {
+		if manifest.Version != query.Version {
+			return HandleMatch{}, false
+		}
+		match.Score += 10
+		match.MatchReasons = append(match.MatchReasons, "version:"+query.Version)
+	}
+
+	return match, true
+}
+
 // matchesTags returns true if handleTags contains all of the required tags.
 // An empty required slice matches everything.
 func matchesTags(handleTags, required []string) bool {
+	return containsAll(handleTags, required)
+}
+
+func containsAll(values, required []string) bool {
 	if len(required) == 0 {
 		return true
 	}
-	tagSet := make(map[string]bool, len(handleTags))
-	for _, t := range handleTags {
-		tagSet[t] = true
+	valueSet := make(map[string]bool, len(values))
+	for _, value := range values {
+		valueSet[value] = true
 	}
-	for _, r := range required {
-		if !tagSet[r] {
+	for _, needed := range required {
+		if !valueSet[needed] {
 			return false
 		}
 	}
 	return true
+}
+
+func hasCommand(commands []CommandSpec, name string) bool {
+	for _, command := range commands {
+		if command.Name == name {
+			return true
+		}
+	}
+	return false
 }

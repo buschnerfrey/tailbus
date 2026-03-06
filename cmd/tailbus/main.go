@@ -45,6 +45,59 @@ func stripPort(addr string) string {
 	return addr
 }
 
+func splitCSV(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		result = append(result, part)
+	}
+	return result
+}
+
+func printManifestSummary(m *messagepb.ServiceManifest, indent string) {
+	if m == nil {
+		return
+	}
+	if m.Description != "" {
+		fmt.Printf("%sdescription: %s\n", indent, m.Description)
+	}
+	if m.Version != "" {
+		fmt.Printf("%sversion: %s\n", indent, m.Version)
+	}
+	if len(m.Capabilities) > 0 {
+		fmt.Printf("%scapabilities: %s\n", indent, strings.Join(m.Capabilities, ", "))
+	}
+	if len(m.Domains) > 0 {
+		fmt.Printf("%sdomains: %s\n", indent, strings.Join(m.Domains, ", "))
+	}
+	if len(m.InputTypes) > 0 {
+		fmt.Printf("%sinput_types: %s\n", indent, strings.Join(m.InputTypes, ", "))
+	}
+	if len(m.OutputTypes) > 0 {
+		fmt.Printf("%soutput_types: %s\n", indent, strings.Join(m.OutputTypes, ", "))
+	}
+	if len(m.Tags) > 0 {
+		fmt.Printf("%stags: %s\n", indent, strings.Join(m.Tags, ", "))
+	}
+	if len(m.Commands) > 0 {
+		fmt.Printf("%scommands:\n", indent)
+		for _, c := range m.Commands {
+			if c.Description != "" {
+				fmt.Printf("%s  %s - %s\n", indent, c.Name, c.Description)
+			} else {
+				fmt.Printf("%s  %s\n", indent, c.Name)
+			}
+		}
+	}
+}
+
 func main() {
 	socketPath := flag.String("socket", "/tmp/tailbusd.sock", "daemon Unix socket path")
 	flag.Parse()
@@ -64,7 +117,7 @@ func main() {
 		fmt.Println("  stop      Stop the running daemon")
 		fmt.Println("\nMesh commands:")
 		fmt.Println("  fire      One-shot: send message, wait for response, print, exit")
-		fmt.Println("  register, introspect, list, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
+		fmt.Println("  register, introspect, list, find, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
 		os.Exit(1)
 	}
 
@@ -314,9 +367,13 @@ func main() {
 		}
 
 	case "list":
-		req := &agentpb.ListHandlesRequest{}
-		if len(args) >= 2 {
-			req.Tags = strings.Split(args[1], ",")
+		listFlags := flag.NewFlagSet("list", flag.ExitOnError)
+		listTags := listFlags.String("tags", "", "comma-separated required tags")
+		listVerbose := listFlags.Bool("verbose", false, "show full manifest details")
+		listFlags.Parse(args[1:])
+		req := &agentpb.ListHandlesRequest{Tags: splitCSV(*listTags)}
+		if req.Tags == nil && listFlags.NArg() >= 1 {
+			req.Tags = splitCSV(listFlags.Arg(0))
 		}
 		resp, err := client.ListHandles(ctx, req)
 		if err != nil {
@@ -327,6 +384,11 @@ func main() {
 			fmt.Println("No handles found")
 		} else {
 			for _, e := range resp.Entries {
+				if *listVerbose {
+					fmt.Printf("  %s\n", e.Handle)
+					printManifestSummary(e.Manifest, "    ")
+					continue
+				}
 				desc := ""
 				if e.Manifest != nil && e.Manifest.Description != "" {
 					desc = " - " + e.Manifest.Description
@@ -336,6 +398,42 @@ func main() {
 					tags = " [" + strings.Join(e.Manifest.Tags, ", ") + "]"
 				}
 				fmt.Printf("  %s%s%s\n", e.Handle, desc, tags)
+			}
+		}
+
+	case "find":
+		findFlags := flag.NewFlagSet("find", flag.ExitOnError)
+		findCapabilities := findFlags.String("capabilities", "", "comma-separated required capabilities")
+		findDomains := findFlags.String("domains", "", "comma-separated required domains")
+		findTags := findFlags.String("tags", "", "comma-separated required tags")
+		findCommand := findFlags.String("command", "", "required command name")
+		findVersion := findFlags.String("version", "", "required exact version")
+		findLimit := findFlags.Uint("limit", 0, "maximum matches to return")
+		findFlags.Parse(args[1:])
+		resp, err := client.FindHandles(ctx, &agentpb.FindHandlesRequest{
+			Capabilities: splitCSV(*findCapabilities),
+			Domains:      splitCSV(*findDomains),
+			Tags:         splitCSV(*findTags),
+			CommandName:  *findCommand,
+			Version:      *findVersion,
+			Limit:        uint32(*findLimit),
+		})
+		if err != nil {
+			logger.Error("find handles failed", "error", err)
+			os.Exit(1)
+		}
+		if len(resp.Matches) == 0 {
+			fmt.Println("No matching handles found")
+			break
+		}
+		for _, match := range resp.Matches {
+			desc := ""
+			if match.Manifest != nil && match.Manifest.Description != "" {
+				desc = " - " + match.Manifest.Description
+			}
+			fmt.Printf("  %s (score=%d)%s\n", match.Handle, match.Score, desc)
+			if len(match.MatchReasons) > 0 {
+				fmt.Printf("    reasons: %s\n", strings.Join(match.MatchReasons, ", "))
 			}
 		}
 

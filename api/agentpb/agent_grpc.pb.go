@@ -22,6 +22,7 @@ const (
 	AgentAPI_Register_FullMethodName         = "/tailbus.v1.AgentAPI/Register"
 	AgentAPI_IntrospectHandle_FullMethodName = "/tailbus.v1.AgentAPI/IntrospectHandle"
 	AgentAPI_ListHandles_FullMethodName      = "/tailbus.v1.AgentAPI/ListHandles"
+	AgentAPI_FindHandles_FullMethodName      = "/tailbus.v1.AgentAPI/FindHandles"
 	AgentAPI_OpenSession_FullMethodName      = "/tailbus.v1.AgentAPI/OpenSession"
 	AgentAPI_SendMessage_FullMethodName      = "/tailbus.v1.AgentAPI/SendMessage"
 	AgentAPI_Subscribe_FullMethodName        = "/tailbus.v1.AgentAPI/Subscribe"
@@ -48,6 +49,7 @@ type AgentAPIClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
 	IntrospectHandle(ctx context.Context, in *IntrospectHandleRequest, opts ...grpc.CallOption) (*IntrospectHandleResponse, error)
 	ListHandles(ctx context.Context, in *ListHandlesRequest, opts ...grpc.CallOption) (*ListHandlesResponse, error)
+	FindHandles(ctx context.Context, in *FindHandlesRequest, opts ...grpc.CallOption) (*FindHandlesResponse, error)
 	OpenSession(ctx context.Context, in *OpenSessionRequest, opts ...grpc.CallOption) (*OpenSessionResponse, error)
 	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[IncomingMessage], error)
@@ -99,6 +101,16 @@ func (c *agentAPIClient) ListHandles(ctx context.Context, in *ListHandlesRequest
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListHandlesResponse)
 	err := c.cc.Invoke(ctx, AgentAPI_ListHandles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentAPIClient) FindHandles(ctx context.Context, in *FindHandlesRequest, opts ...grpc.CallOption) (*FindHandlesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FindHandlesResponse)
+	err := c.cc.Invoke(ctx, AgentAPI_FindHandles_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -300,6 +312,7 @@ type AgentAPIServer interface {
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
 	IntrospectHandle(context.Context, *IntrospectHandleRequest) (*IntrospectHandleResponse, error)
 	ListHandles(context.Context, *ListHandlesRequest) (*ListHandlesResponse, error)
+	FindHandles(context.Context, *FindHandlesRequest) (*FindHandlesResponse, error)
 	OpenSession(context.Context, *OpenSessionRequest) (*OpenSessionResponse, error)
 	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[IncomingMessage]) error
@@ -335,6 +348,9 @@ func (UnimplementedAgentAPIServer) IntrospectHandle(context.Context, *Introspect
 }
 func (UnimplementedAgentAPIServer) ListHandles(context.Context, *ListHandlesRequest) (*ListHandlesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListHandles not implemented")
+}
+func (UnimplementedAgentAPIServer) FindHandles(context.Context, *FindHandlesRequest) (*FindHandlesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FindHandles not implemented")
 }
 func (UnimplementedAgentAPIServer) OpenSession(context.Context, *OpenSessionRequest) (*OpenSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenSession not implemented")
@@ -458,6 +474,24 @@ func _AgentAPI_ListHandles_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentAPIServer).ListHandles(ctx, req.(*ListHandlesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentAPI_FindHandles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FindHandlesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentAPIServer).FindHandles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentAPI_FindHandles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentAPIServer).FindHandles(ctx, req.(*FindHandlesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -772,6 +806,10 @@ var AgentAPI_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListHandles",
 			Handler:    _AgentAPI_ListHandles_Handler,
+		},
+		{
+			MethodName: "FindHandles",
+			Handler:    _AgentAPI_FindHandles_Handler,
 		},
 		{
 			MethodName: "OpenSession",
