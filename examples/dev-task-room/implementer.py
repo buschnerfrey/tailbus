@@ -68,6 +68,7 @@ agent = AsyncAgent(
 )
 
 seen_turns: set[str] = set()
+MAX_SEEN_TURNS = 500
 
 
 def build_prompt(payload: dict[str, object], task: dict[str, object], transcript: str) -> str:
@@ -159,6 +160,9 @@ async def handle(msg: RoomEvent) -> None:
     if not turn_id or turn_id in seen_turns:
         return
     seen_turns.add(turn_id)
+    if len(seen_turns) > MAX_SEEN_TURNS:
+        seen_turns.clear()
+        seen_turns.add(turn_id)
     model_label = CODEX_MODEL or "codex default model"
     say(agent.handle, f"implementing via {BOLD}{model_label}{RESET}")
     progress_task = asyncio.create_task(

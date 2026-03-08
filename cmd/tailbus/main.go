@@ -285,7 +285,7 @@ func main() {
 	if args[0] == "dashboard" {
 		token := ""
 		if tokenData, err := os.ReadFile(*socketPath + ".token"); err == nil {
-			token = string(tokenData)
+			token = strings.TrimSpace(string(tokenData))
 		}
 		if err := runDashboard(*socketPath, token); err != nil {
 			logger.Error("dashboard error", "error", err)
@@ -296,7 +296,7 @@ func main() {
 
 	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	if tokenData, err := os.ReadFile(*socketPath + ".token"); err == nil {
-		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(tokenCreds{token: string(tokenData)}))
+		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(tokenCreds{token: strings.TrimSpace(string(tokenData))}))
 	}
 	conn, err := grpc.NewClient("unix://"+*socketPath, dialOpts...)
 	if err != nil {

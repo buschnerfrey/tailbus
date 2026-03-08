@@ -20,6 +20,7 @@ from dev_task_common import (
     TURN_PROGRESS_INTERVAL,
     RESET,
     YELLOW,
+    is_room_closed_error,
     llm_stream_call,
     parse_json,
     parse_json_object,
@@ -64,6 +65,7 @@ agent = AsyncAgent(
 )
 
 seen_turns: set[str] = set()
+MAX_SEEN_TURNS = 500
 
 
 async def review_turn(room_id: str, payload: dict[str, object]) -> dict[str, object]:
@@ -140,6 +142,9 @@ async def handle(msg: RoomEvent) -> None:
     if not turn_id or turn_id in seen_turns:
         return
     seen_turns.add(turn_id)
+    if len(seen_turns) > MAX_SEEN_TURNS:
+        seen_turns.clear()
+        seen_turns.add(turn_id)
     say(agent.handle, f"reviewing via {BOLD}{LLM_BASE_URL}{RESET}")
     progress_state = {"summary": "Critic started streaming review output."}
     progress_task = asyncio.create_task(
@@ -178,12 +183,18 @@ async def handle(msg: RoomEvent) -> None:
         say(agent.handle, f"{GREEN}posted{RESET} review in {reply['elapsed_sec']:.1f}s")
     else:
         say(agent.handle, f"{YELLOW}error{RESET}: {reply.get('error', 'unknown error')}")
-    await agent.post_room_message(
-        msg.room_id,
-        json.dumps(reply),
-        content_type="application/json",
-        trace_id=turn_id,
-    )
+    try:
+        await agent.post_room_message(
+            msg.room_id,
+            json.dumps(reply),
+            content_type="application/json",
+            trace_id=turn_id,
+        )
+    except Exception as exc:
+        if is_room_closed_error(exc):
+            say(agent.handle, f"{YELLOW}room closed{RESET} before review reply could be posted")
+        else:
+            raise
 
 
 async def main() -> None:

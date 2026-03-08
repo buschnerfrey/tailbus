@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
 import urllib.error
@@ -15,8 +16,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 sys_path = os.path.join(os.path.dirname(__file__), "../../sdk/python/src")
-if sys_path not in os.sys.path:
-    os.sys.path.insert(0, sys_path)
+if sys_path not in sys.path:
+    sys.path.insert(0, sys_path)
 
 from tailbus import AsyncAgent, BridgeError, Manifest, RoomEvent
 
@@ -325,7 +326,10 @@ async def run_codex_json(prompt: str, output_file: str, timeout: int = CODEX_TIM
             return Path(output_file).read_text(encoding="utf-8")
         return stdout.decode().strip() or "[codex error] no output produced"
     except asyncio.TimeoutError:
-        proc.kill()
+        try:
+            proc.kill()
+        except (NameError, ProcessLookupError):
+            pass
         return f"[codex error] timed out after {timeout}s"
     except FileNotFoundError:
         return "[codex error] 'codex' CLI not found"

@@ -49,6 +49,7 @@ agent = AsyncAgent(
 )
 
 seen_turns: set[str] = set()
+MAX_SEEN_TURNS = 500
 
 
 def validate_relative_path(path: str) -> Path:
@@ -176,6 +177,9 @@ async def handle(msg: RoomEvent) -> None:
     if not turn_id or turn_id in seen_turns:
         return
     seen_turns.add(turn_id)
+    if len(seen_turns) > MAX_SEEN_TURNS:
+        seen_turns.clear()
+        seen_turns.add(turn_id)
     say(agent.handle, f"{BOLD}{kind}{RESET}")
     started = time.monotonic()
     try:
