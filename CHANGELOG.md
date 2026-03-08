@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [v0.4.0] — 2026-03-09
+
+### Added
+- **Interactive chat room** — `examples/chat-room/` lets you chat live with two LLM agents (atlas & nova) with distinct personalities and @mention routing
+- **Parallel review** — `examples/parallel-review/` fans out code review to three specialist agents (security, performance, style) simultaneously
+- **Go agent swarm** — `examples/agent-swarm/` demonstrates five pure-Go agents (4 analyzers + orchestrator) in a single binary with direct gRPC connections
+- **Dev-task-room demo mode** — `./run.sh demo` runs an unattended end-to-end task cycle
+- Capability-based agent discovery via `find_handles`
+- Structured capability metadata on manifests
+- Room-based multi-agent coordination with replay
+- LM Studio model count preflight check in example runners
+
+### Fixed
+- Critic timeout cascade — progress pinger now catches transient errors instead of crashing; `asyncio.shield()` prevents Python 3.12 `wait_for` from blocking on thread cancellation
+- Seen-turns FIFO eviction preventing unbounded memory growth
+- Auth token whitespace handling, process cleanup in run.sh scripts
+- Dashboard reconnect stability, node layout jitter, progress state tracking
+
 ## [v0.3.9] — 2026-03-05
 
 ### Added
@@ -84,7 +102,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Real-time TUI dashboard
 - Release pipeline and install script
 
-[Unreleased]: https://github.com/alexanderfrey/tailbus/compare/v0.3.8...HEAD
+[Unreleased]: https://github.com/alexanderfrey/tailbus/compare/v0.4.0...HEAD
+[v0.4.0]: https://github.com/alexanderfrey/tailbus/compare/v0.3.9...v0.4.0
+[v0.3.9]: https://github.com/alexanderfrey/tailbus/compare/v0.3.8...v0.3.9
 [v0.3.8]: https://github.com/alexanderfrey/tailbus/compare/v0.3.7...v0.3.8
 [v0.3.7]: https://github.com/alexanderfrey/tailbus/compare/v0.3.6...v0.3.7
 [v0.3.6]: https://github.com/alexanderfrey/tailbus/compare/v0.3.5...v0.3.6
