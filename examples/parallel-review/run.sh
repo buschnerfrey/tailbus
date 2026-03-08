@@ -7,18 +7,18 @@ if [ -d "${REPO_ROOT}/bin" ]; then
     export PATH="${REPO_ROOT}/bin:${PATH}"
 fi
 
-COORD_ADDR="127.0.0.1:18743"
-COORD_HEALTH=":18781"
-COORD_DATA="/tmp/devtaskroom-coord"
-LOG_DIR="/tmp/devtaskroom-logs"
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-/tmp/devtaskroom-workspace}"
+COORD_ADDR="127.0.0.1:18843"
+COORD_HEALTH=":18881"
+COORD_DATA="/tmp/parallelreview-coord"
+LOG_DIR="/tmp/parallelreview-logs"
 OUTPUT_DIR="${SCRIPT_DIR}/output"
 GO_TMPDIR="${TMPDIR:-/tmp}"
 
 NODES="
-control-node:19743:19311
-implement-node:19744:19312
-review-node:19745:19313
+control-node:19843:19411
+security-node:19844:19412
+perf-node:19845:19413
+style-node:19846:19414
 "
 
 DIM="\033[2m"
@@ -34,49 +34,17 @@ good() { echo -e "  ${DIM}run.sh${RESET}  ${GREEN}✓${RESET} $*"; }
 warn() { echo -e "  ${DIM}run.sh${RESET}  ${YELLOW}!${RESET} $*"; }
 fail() { echo -e "  ${DIM}run.sh${RESET}  ${RED}✗${RESET} $*"; exit 1; }
 
-scenario_text() {
-    case "$1" in
-        snake-clone)
-            printf '%s' "Build a simple Snake clone in Python using only the standard library. Include a playable interface, food spawning, score tracking, wall and self collision, restart handling, and unit tests for the core game logic."
-            ;;
-        parser-edge-case)
-            printf '%s' "Extend the CSV parser so quoted commas are handled correctly and add coverage for the edge case."
-            ;;
-        todo-filter)
-            printf '%s' "Make the todo status filter case-insensitive and ensure the tests cover mixed-case input."
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-}
-
-print_scenarios() {
-    echo ""
-    echo -e "  ${BOLD}Dev Task scenarios${RESET}"
-    echo -e "  ${DIM}────────────────────────────────────────${RESET}"
-    echo ""
-    echo "  snake-clone      build a Snake clone in Python"
-    echo "  parser-edge-case fix quoted-comma parsing"
-    echo "  todo-filter      make the todo filter case-insensitive"
-    echo ""
-    echo "  Examples:"
-    echo "    ./run.sh fire snake-clone"
-    echo "    ./run.sh fire-task \"Add a timeout parameter to the HTTP client and update tests\""
-    echo ""
-}
-
 llm_base_url() {
     printf '%s' "${LLM_BASE_URL:-http://127.0.0.1:1234/v1}"
 }
 
 doctor() {
     echo ""
-    echo -e "  ${BOLD}Dev Task Room Doctor${RESET}"
+    echo -e "  ${BOLD}Parallel Review Doctor${RESET}"
     echo -e "  ${DIM}────────────────────────────────────────${RESET}"
     echo ""
 
-    for tool in tailbus-coord tailbusd tailbus python3 curl codex; do
+    for tool in tailbus-coord tailbusd tailbus python3 curl; do
         command -v "$tool" >/dev/null 2>&1 || fail "$tool not found in PATH"
         good "$tool found"
     done
@@ -150,8 +118,8 @@ kill_processes_matching() {
 }
 
 stop_all() {
-    say "stopping all dev-task-room processes..."
-    for script in orchestrator.py workspace_agent.py implementer.py critic.py; do
+    say "stopping all parallel-review processes..."
+    for script in orchestrator.py reviewer.py; do
         kill_processes_matching "${SCRIPT_DIR}/${script}"
     done
     for entry in $NODES; do
@@ -161,15 +129,15 @@ stop_all() {
         kill_listener_on_port "${metrics_port}"
     done
     kill_processes_matching "tailbus-coord.*${COORD_ADDR}"
-    kill_listener_on_port 18743
-    kill_listener_on_port 18781
+    kill_listener_on_port 18843
+    kill_listener_on_port 18881
     sleep 1
-    rm -f /tmp/devtaskroom-*.sock
+    rm -f /tmp/parallelreview-*.sock
     rm -f \
         "${GO_TMPDIR}/tailbusd-control-node.coord-fp" \
-        "${GO_TMPDIR}/tailbusd-implement-node.coord-fp" \
-        "${GO_TMPDIR}/tailbusd-review-node.coord-fp"
-    rm -rf "${WORKSPACE_ROOT}"
+        "${GO_TMPDIR}/tailbusd-security-node.coord-fp" \
+        "${GO_TMPDIR}/tailbusd-perf-node.coord-fp" \
+        "${GO_TMPDIR}/tailbusd-style-node.coord-fp"
     good "stopped"
 }
 
@@ -178,14 +146,14 @@ watch_logs() {
         fail "no logs found — is the demo running?"
     fi
     echo ""
-    echo -e "  ${BOLD}Watching dev-task-room logs${RESET}  ${DIM}(ctrl-c to stop)${RESET}"
+    echo -e "  ${BOLD}Watching parallel-review logs${RESET}  ${DIM}(ctrl-c to stop)${RESET}"
     echo -e "  ${DIM}────────────────────────────────────────${RESET}"
     echo ""
     tail -f "$LOG_DIR"/agent-*.log 2>/dev/null
 }
 
 launch_dashboard() {
-    local sock="/tmp/devtaskroom-control-node.sock"
+    local sock="/tmp/parallelreview-control-node.sock"
     if [ ! -S "$sock" ]; then
         fail "control node not running (no socket at $sock)"
     fi
@@ -198,9 +166,8 @@ start_all() {
     mkdir -p "$LOG_DIR" "$COORD_DATA" "$OUTPUT_DIR"
 
     echo ""
-    echo -e "  ${BOLD}Dev Task Room${RESET}"
+    echo -e "  ${BOLD}Parallel Review Room${RESET}"
     echo -e "  ${DIM}────────────────────────────────────────${RESET}"
-    echo -e "  ${DIM}workspace: ${WORKSPACE_ROOT}${RESET}"
     echo ""
 
     say "starting coord on ${CYAN}${COORD_ADDR}${RESET}..."
@@ -216,7 +183,7 @@ start_all() {
     for entry in $NODES; do
         local name listen_port metrics_port
         IFS=: read -r name listen_port metrics_port <<< "$entry"
-        local sock="/tmp/devtaskroom-${name}.sock"
+        local sock="/tmp/parallelreview-${name}.sock"
         say "starting daemon ${BOLD}${name}${RESET} on :${listen_port}..."
         tailbusd \
             -listen ":${listen_port}" \
@@ -238,47 +205,65 @@ start_all() {
     done
 
     say "starting agents..."
-    TAILBUS_SOCKET="/tmp/devtaskroom-control-node.sock" OUTPUT_DIR="${OUTPUT_DIR}" python3 "${SCRIPT_DIR}/orchestrator.py" \
+    TAILBUS_SOCKET="/tmp/parallelreview-control-node.sock" OUTPUT_DIR="${OUTPUT_DIR}" \
+        python3 "${SCRIPT_DIR}/orchestrator.py" \
         > "${LOG_DIR}/agent-orchestrator.log" 2>&1 &
-    TAILBUS_SOCKET="/tmp/devtaskroom-control-node.sock" WORKSPACE_ROOT="${WORKSPACE_ROOT}" python3 "${SCRIPT_DIR}/workspace_agent.py" \
-        > "${LOG_DIR}/agent-workspace-agent.log" 2>&1 &
-    TAILBUS_SOCKET="/tmp/devtaskroom-implement-node.sock" CODEX_MODEL="${CODEX_MODEL:-gpt-5.1-codex-mini}" python3 "${SCRIPT_DIR}/implementer.py" \
-        > "${LOG_DIR}/agent-implementer.log" 2>&1 &
-    TAILBUS_SOCKET="/tmp/devtaskroom-review-node.sock" LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" python3 "${SCRIPT_DIR}/critic.py" \
-        > "${LOG_DIR}/agent-critic.log" 2>&1 &
+
+    TAILBUS_SOCKET="/tmp/parallelreview-security-node.sock" \
+        REVIEWER_ROLE=security REVIEWER_HANDLE=security-reviewer REVIEWER_CAP=review.security \
+        LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" \
+        python3 "${SCRIPT_DIR}/reviewer.py" \
+        > "${LOG_DIR}/agent-security-reviewer.log" 2>&1 &
+
+    TAILBUS_SOCKET="/tmp/parallelreview-perf-node.sock" \
+        REVIEWER_ROLE=performance REVIEWER_HANDLE=perf-reviewer REVIEWER_CAP=review.performance \
+        LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" \
+        python3 "${SCRIPT_DIR}/reviewer.py" \
+        > "${LOG_DIR}/agent-perf-reviewer.log" 2>&1 &
+
+    TAILBUS_SOCKET="/tmp/parallelreview-style-node.sock" \
+        REVIEWER_ROLE=style REVIEWER_HANDLE=style-reviewer REVIEWER_CAP=review.style \
+        LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" \
+        python3 "${SCRIPT_DIR}/reviewer.py" \
+        > "${LOG_DIR}/agent-style-reviewer.log" 2>&1 &
 
     sleep 2
-    for log in "${LOG_DIR}/agent-orchestrator.log" "${LOG_DIR}/agent-workspace-agent.log" "${LOG_DIR}/agent-implementer.log" "${LOG_DIR}/agent-critic.log"; do
+    for log in "${LOG_DIR}/agent-orchestrator.log" "${LOG_DIR}/agent-security-reviewer.log" "${LOG_DIR}/agent-perf-reviewer.log" "${LOG_DIR}/agent-style-reviewer.log"; do
         grep -q "ready" "$log" || fail "agent failed to start — check $log"
     done
 
     echo ""
-    echo -e "  ${GREEN}All running.${RESET} 1 coord + 3 daemons + 4 agents"
+    echo -e "  ${GREEN}All running.${RESET} 1 coord + 4 daemons + 4 agents"
     echo -e "  ${DIM}Open another terminal for:${RESET} ./run.sh dashboard"
-    echo -e "  ${DIM}Then run:${RESET} ./run.sh fire todo-filter"
+    echo -e "  ${DIM}Then run:${RESET} ./run.sh fire insecure-api"
     echo ""
-}
-
-fire_task() {
-    local task="$1"
-    local sock="/tmp/devtaskroom-control-node.sock"
-    local fire_timeout="${FIRE_TIMEOUT:-600s}"
-    [ -S "$sock" ] || fail "control node not running (no socket at $sock)"
-    say "firing task..."
-    say "watch ${CYAN}./run.sh dashboard${RESET} or ${CYAN}./run.sh logs${RESET} while the room is active"
-    echo ""
-    local payload
-    payload="$(python3 -c 'import json,sys; print(json.dumps({"command":"run_task","arguments":{"task":sys.argv[1]}}))' "$task")"
-    tailbus -socket "$sock" fire -timeout "$fire_timeout" task-orchestrator "$payload"
 }
 
 fire_scenario() {
-    local task="$1"
-    if scenario_text "$task" >/dev/null 2>&1; then
-        fire_task "$(scenario_text "$task")"
-    else
-        fire_task "$task"
-    fi
+    local scenario="$1"
+    local sock="/tmp/parallelreview-control-node.sock"
+    local fire_timeout="${FIRE_TIMEOUT:-300s}"
+    [ -S "$sock" ] || fail "control node not running (no socket at $sock)"
+    say "firing review scenario: ${BOLD}${scenario}${RESET}"
+    say "watch ${CYAN}./run.sh dashboard${RESET} or ${CYAN}./run.sh logs${RESET}"
+    echo ""
+    local payload
+    payload="$(python3 -c 'import json,sys; print(json.dumps({"command":"review","arguments":{"scenario":sys.argv[1]}}))' "$scenario")"
+    tailbus -socket "$sock" fire -timeout "$fire_timeout" review-orchestrator "$payload"
+}
+
+print_scenarios() {
+    echo ""
+    echo -e "  ${BOLD}Review scenarios${RESET}"
+    echo -e "  ${DIM}────────────────────────────────────────${RESET}"
+    echo ""
+    echo "  insecure-api   Flask API with SQL injection, auth bypass, secret exposure"
+    echo "  slow-search    O(n^2) search, bubble sort, redundant iterations"
+    echo "  messy-code     Single-letter vars, deep nesting, no docs"
+    echo ""
+    echo "  Examples:"
+    echo "    ./run.sh fire insecure-api"
+    echo ""
 }
 
 case "${1:-start}" in
@@ -290,19 +275,14 @@ case "${1:-start}" in
     scenarios) print_scenarios ;;
     fire)
         shift
-        [ "$#" -gt 0 ] || fail "usage: ./run.sh fire <scenario|task>"
+        [ "$#" -gt 0 ] || fail "usage: ./run.sh fire <scenario>"
         fire_scenario "$*"
-        ;;
-    fire-task)
-        shift
-        [ "$#" -gt 0 ] || fail "usage: ./run.sh fire-task \"task text\""
-        fire_task "$*"
         ;;
     demo)
         start_all
-        say "running demo task ${BOLD}(todo-filter)${RESET}..."
+        say "running demo review ${BOLD}(insecure-api)${RESET}..."
         echo ""
-        fire_scenario "todo-filter"
+        fire_scenario "insecure-api"
         result=$?
         echo ""
         say "demo complete (exit ${result})"
@@ -311,7 +291,7 @@ case "${1:-start}" in
         ;;
     *)
         cat <<EOF
-Usage: ./run.sh [start|stop|logs|doctor|dashboard|scenarios|fire|fire-task|demo]
+Usage: ./run.sh [start|stop|logs|doctor|dashboard|scenarios|fire|demo]
 EOF
         exit 1
         ;;
