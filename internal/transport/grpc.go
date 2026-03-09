@@ -126,7 +126,9 @@ const directFailTTL = 60 * time.Second
 
 // Send sends an envelope to a peer. Establishes connection lazily.
 // On send failure, falls back to relay if available.
-func (t *GRPCTransport) Send(addr string, msg *transportpb.TransportMessage) error {
+// The context bounds connection establishment and the send; the underlying
+// stream lives beyond this call (bound to the daemon lifetime context).
+func (t *GRPCTransport) Send(ctx context.Context, addr string, msg *transportpb.TransportMessage) error {
 	// Check if direct connection to this addr recently failed
 	t.relayMu.Lock()
 	failTime, directFailed := t.directFails[addr]
@@ -137,7 +139,7 @@ func (t *GRPCTransport) Send(addr string, msg *transportpb.TransportMessage) err
 	t.relayMu.Unlock()
 
 	if !directFailed {
-		err := t.sendDirect(addr, msg)
+		err := t.sendDirect(ctx, addr, msg)
 		if err == nil {
 			return nil
 		}
@@ -152,12 +154,12 @@ func (t *GRPCTransport) Send(addr string, msg *transportpb.TransportMessage) err
 	if t.resolver == nil {
 		return fmt.Errorf("direct send to %s failed and no resolver for relay fallback", addr)
 	}
-	return t.sendViaRelay(addr, msg)
+	return t.sendViaRelay(ctx, addr, msg)
 }
 
 // sendDirect sends a transport message directly to a peer.
-func (t *GRPCTransport) sendDirect(addr string, msg *transportpb.TransportMessage) error {
-	pc, err := t.getOrConnect(addr)
+func (t *GRPCTransport) sendDirect(ctx context.Context, addr string, msg *transportpb.TransportMessage) error {
+	pc, err := t.getOrConnect(ctx, addr)
 	if err != nil {
 		return err
 	}
@@ -173,21 +175,30 @@ func (t *GRPCTransport) sendDirect(addr string, msg *transportpb.TransportMessag
 		return nil
 	}
 
-	// Connection broken — reconnect under lock to avoid races
+	// Connection broken — clean up the stale entry
 	t.mu.Lock()
-	// Only clean up if the peer entry is still the same broken connection
 	if current, ok := t.peers[addr]; ok && current == pc {
 		delete(t.peers, addr)
 		pc.conn.Close()
 	}
+	t.mu.Unlock()
 
-	pc2, cerr := t.connectLocked(addr)
+	// Reconnect outside the lock
+	pc2, cerr := t.connect(ctx, addr)
 	if cerr != nil {
-		t.mu.Unlock()
 		return fmt.Errorf("reconnect to %s: %w", addr, cerr)
 	}
-	t.peers[addr] = pc2
-	t.mu.Unlock()
+
+	// Store, but check for a race
+	t.mu.Lock()
+	if existing, ok := t.peers[addr]; ok {
+		t.mu.Unlock()
+		pc2.conn.Close()
+		pc2 = existing
+	} else {
+		t.peers[addr] = pc2
+		t.mu.Unlock()
+	}
 
 	pc2.mu.Lock()
 	defer pc2.mu.Unlock()
@@ -201,7 +212,7 @@ func (t *GRPCTransport) sendDirect(addr string, msg *transportpb.TransportMessag
 }
 
 // sendViaRelay sends a transport message through a relay server.
-func (t *GRPCTransport) sendViaRelay(peerAddr string, msg *transportpb.TransportMessage) error {
+func (t *GRPCTransport) sendViaRelay(_ context.Context, peerAddr string, msg *transportpb.TransportMessage) error {
 	// Look up the target's pubkey from the resolver by matching addr
 	targetKey := t.pubkeyForAddr(peerAddr)
 	if targetKey == nil {
@@ -356,24 +367,37 @@ func (t *GRPCTransport) ConnectToRelays() {
 	}
 }
 
-func (t *GRPCTransport) getOrConnect(addr string) (*peerConn, error) {
+func (t *GRPCTransport) getOrConnect(ctx context.Context, addr string) (*peerConn, error) {
+	// Fast path: already connected
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	if pc, ok := t.peers[addr]; ok {
+		t.mu.Unlock()
 		return pc, nil
 	}
+	t.mu.Unlock()
 
-	pc, err := t.connectLocked(addr)
+	// Slow path: connect outside the global lock
+	pc, err := t.connect(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
+
+	// Store, but check if another goroutine raced us
+	t.mu.Lock()
+	if existing, ok := t.peers[addr]; ok {
+		t.mu.Unlock()
+		pc.conn.Close() // discard duplicate; recvLoop will exit on stream close
+		return existing, nil
+	}
 	t.peers[addr] = pc
+	t.mu.Unlock()
 	return pc, nil
 }
 
-// connectLocked creates a new peer connection. Must be called with t.mu held.
-func (t *GRPCTransport) connectLocked(addr string) (*peerConn, error) {
+// connect creates a new peer connection without holding t.mu.
+// The ctx bounds connection establishment; the stream itself is bound to t.ctx
+// so it lives for the daemon lifetime.
+func (t *GRPCTransport) connect(ctx context.Context, addr string) (*peerConn, error) {
 	var dialOpt grpc.DialOption
 	if t.tlsCert != nil {
 		clientTLS := &tls.Config{
@@ -400,20 +424,34 @@ func (t *GRPCTransport) connectLocked(addr string) (*peerConn, error) {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
 
-	client := transportpb.NewNodeTransportClient(conn)
-	stream, err := client.Exchange(t.ctx)
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("open exchange stream to %s: %w", addr, err)
+	// Race Exchange(t.ctx) against the per-call ctx so we bail out if the
+	// caller's deadline expires, but the stream itself stays bound to the
+	// daemon lifetime context (t.ctx).
+	type exchangeResult struct {
+		stream transportpb.NodeTransport_ExchangeClient
+		err    error
 	}
+	ch := make(chan exchangeResult, 1)
+	client := transportpb.NewNodeTransportClient(conn)
+	go func() {
+		s, e := client.Exchange(t.ctx)
+		ch <- exchangeResult{s, e}
+	}()
 
-	pc := &peerConn{conn: conn, stream: stream}
-
-	// Start receiving on this outbound stream
-	go t.recvLoop(addr, pc, stream)
-
-	t.logger.Info("connected to peer", "addr", addr)
-	return pc, nil
+	select {
+	case <-ctx.Done():
+		conn.Close()
+		return nil, fmt.Errorf("connect to %s: %w", addr, ctx.Err())
+	case res := <-ch:
+		if res.err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("open exchange stream to %s: %w", addr, res.err)
+		}
+		pc := &peerConn{conn: conn, stream: res.stream}
+		go t.recvLoop(addr, pc, res.stream)
+		t.logger.Info("connected to peer", "addr", addr)
+		return pc, nil
+	}
 }
 
 func (t *GRPCTransport) recvLoop(addr string, pc *peerConn, stream transportpb.NodeTransport_ExchangeClient) {

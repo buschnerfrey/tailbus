@@ -8,10 +8,16 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 )
+
+// roomOpTimeout is the per-operation timeout for room commands in the bridge,
+// slightly longer than the daemon's internal room command timeout to give it
+// a chance to return its own error first.
+const roomOpTimeout = 15 * time.Second
 
 // Inbound command types (stdin)
 
@@ -546,11 +552,13 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "create_room"})
 					continue
 				}
-				resp, err := client.CreateRoom(ctx, &agentpb.CreateRoomRequest{
+				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+				resp, err := client.CreateRoom(opCtx, &agentpb.CreateRoomRequest{
 					CreatorHandle:  handle,
 					Title:          cmd.Title,
 					InitialMembers: cmd.Members,
 				})
+				opCancel()
 				if err != nil {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "create_room"})
 					continue
@@ -562,7 +570,9 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "join_room"})
 					continue
 				}
-				resp, err := client.JoinRoom(ctx, &agentpb.JoinRoomRequest{RoomId: cmd.RoomID, Handle: handle})
+				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+				resp, err := client.JoinRoom(opCtx, &agentpb.JoinRoomRequest{RoomId: cmd.RoomID, Handle: handle})
+				opCancel()
 				if err != nil {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "join_room"})
 					continue
@@ -574,7 +584,9 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "leave_room"})
 					continue
 				}
-				resp, err := client.LeaveRoom(ctx, &agentpb.LeaveRoomRequest{RoomId: cmd.RoomID, Handle: handle})
+				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+				resp, err := client.LeaveRoom(opCtx, &agentpb.LeaveRoomRequest{RoomId: cmd.RoomID, Handle: handle})
+				opCancel()
 				if err != nil {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "leave_room"})
 					continue
@@ -590,13 +602,15 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 				if ct == "" {
 					ct = "text/plain"
 				}
-				resp, err := client.PostRoomMessage(ctx, &agentpb.PostRoomMessageRequest{
+				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+				resp, err := client.PostRoomMessage(opCtx, &agentpb.PostRoomMessageRequest{
 					RoomId:      cmd.RoomID,
 					FromHandle:  handle,
 					Payload:     []byte(cmd.Payload),
 					ContentType: ct,
 					TraceId:     cmd.TraceID,
 				})
+				opCancel()
 				if err != nil {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "post_room"})
 					continue
@@ -608,7 +622,9 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "list_rooms"})
 					continue
 				}
-				resp, err := client.ListRooms(ctx, &agentpb.ListRoomsRequest{Handle: handle})
+				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+				resp, err := client.ListRooms(opCtx, &agentpb.ListRoomsRequest{Handle: handle})
+				opCancel()
 				if err != nil {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "list_rooms"})
 					continue
@@ -624,7 +640,9 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "room_members"})
 					continue
 				}
-				resp, err := client.ListRoomMembers(ctx, &agentpb.ListRoomMembersRequest{RoomId: cmd.RoomID, Handle: handle})
+				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+				resp, err := client.ListRoomMembers(opCtx, &agentpb.ListRoomMembersRequest{RoomId: cmd.RoomID, Handle: handle})
+				opCancel()
 				if err != nil {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "room_members"})
 					continue
@@ -636,7 +654,9 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "replay_room"})
 					continue
 				}
-				resp, err := client.ReplayRoom(ctx, &agentpb.ReplayRoomRequest{RoomId: cmd.RoomID, Handle: handle, SinceSeq: cmd.SinceSeq})
+				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+				resp, err := client.ReplayRoom(opCtx, &agentpb.ReplayRoomRequest{RoomId: cmd.RoomID, Handle: handle, SinceSeq: cmd.SinceSeq})
+				opCancel()
 				if err != nil {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "replay_room"})
 					continue
@@ -652,7 +672,9 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "close_room"})
 					continue
 				}
-				resp, err := client.CloseRoom(ctx, &agentpb.CloseRoomRequest{RoomId: cmd.RoomID, Handle: handle})
+				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+				resp, err := client.CloseRoom(opCtx, &agentpb.CloseRoomRequest{RoomId: cmd.RoomID, Handle: handle})
+				opCancel()
 				if err != nil {
 					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "close_room"})
 					continue

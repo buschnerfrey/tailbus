@@ -143,8 +143,8 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 	agentSrv.SetRoomManager(roomManager)
 
 	// Create ACK tracker and wire into agent server + router
-	ackTracker := NewAckTracker(func(addr string, env *messagepb.Envelope) error {
-		return tp.Send(addr, &transportpb.TransportMessage{
+	ackTracker := NewAckTracker(func(ctx context.Context, addr string, env *messagepb.Envelope) error {
+		return tp.Send(ctx, addr, &transportpb.TransportMessage{
 			Body: &transportpb.TransportMessage_Envelope{Envelope: env},
 		})
 	}, logger)

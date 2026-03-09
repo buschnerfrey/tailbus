@@ -16,7 +16,7 @@ type fakeRoomTransport struct {
 	sent []*transportpb.TransportMessage
 }
 
-func (f *fakeRoomTransport) Send(_ string, msg *transportpb.TransportMessage) error {
+func (f *fakeRoomTransport) Send(_ context.Context, _ string, msg *transportpb.TransportMessage) error {
 	f.sent = append(f.sent, msg)
 	return nil
 }
@@ -118,6 +118,60 @@ func TestRoomManagerCachesRemoteRoomEventMetadata(t *testing.T) {
 	}
 	if len(deliverer.events) != 1 {
 		t.Fatalf("local deliveries = %d, want 1", len(deliverer.events))
+	}
+}
+
+type slowRoomTransport struct {
+	delay time.Duration
+}
+
+func (s *slowRoomTransport) Send(ctx context.Context, _ string, _ *transportpb.TransportMessage) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(s.delay):
+		return nil
+	}
+}
+
+func (s *slowRoomTransport) OnReceive(func(*transportpb.TransportMessage)) {}
+func (s *slowRoomTransport) Close() error                                   { return nil }
+
+func TestWithRoomControlTimesOutOnSlowTransport(t *testing.T) {
+	store := testStore(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	resolver := handle.NewResolver()
+	resolver.UpdatePeerMap(map[string]handle.PeerInfo{
+		"alice": {NodeID: "node-1", AdvertiseAddr: "10.0.0.1:9443"},
+	})
+
+	// Simulate a room on a remote node with a transport that blocks forever.
+	tp := &slowRoomTransport{delay: time.Minute}
+	deliverer := &fakeRoomDeliverer{}
+	rm := NewRoomManager("node-2", resolver, tp, deliverer, store, NewActivityBus(), logger)
+
+	// Seed a remote room in the store so resolveRoomInfo finds it.
+	remoteRoom := &messagepb.RoomInfo{
+		RoomId:     "room-remote-slow",
+		HomeNodeId: "node-1",
+		Members:    []string{"alice", "bob"},
+		Status:     "open",
+		NextSeq:    1,
+	}
+	if err := store.StoreRoom(remoteRoom); err != nil {
+		t.Fatalf("seed room: %v", err)
+	}
+
+	start := time.Now()
+	_, err := rm.Replay(context.Background(), "room-remote-slow", "alice", 0)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected timeout error from Replay on slow transport")
+	}
+	// Should complete within ~roomCommandTimeout (10s), not the transport's 1min delay.
+	if elapsed > 15*time.Second {
+		t.Fatalf("Replay took %v, expected it to time out around %v", elapsed, roomCommandTimeout)
 	}
 }
 

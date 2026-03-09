@@ -246,6 +246,10 @@ func (rm *RoomManager) HandleTransportMessage(ctx context.Context, msg *transpor
 	}
 }
 
+// roomCommandTimeout is the unified deadline for remote room commands,
+// covering connect + send + result wait.
+const roomCommandTimeout = 10 * time.Second
+
 func (rm *RoomManager) withRoomControl(ctx context.Context, roomID string, cmd *messagepb.RoomCommand) (*messagepb.RoomCommandResult, error) {
 	room, err := rm.resolveRoomInfo(roomID)
 	if err != nil {
@@ -264,6 +268,11 @@ func (rm *RoomManager) withRoomControl(ctx context.Context, roomID string, cmd *
 	if err != nil {
 		return nil, err
 	}
+
+	// Unified deadline covering connect + send + result wait.
+	sendCtx, cancel := context.WithTimeout(ctx, roomCommandTimeout)
+	defer cancel()
+
 	respCh := make(chan *messagepb.RoomCommandResult, 1)
 	rm.mu.Lock()
 	rm.pendingResp[cmd.RequestId] = respCh
@@ -275,15 +284,15 @@ func (rm *RoomManager) withRoomControl(ctx context.Context, roomID string, cmd *
 		rm.mu.Unlock()
 	}()
 
-	if err := rm.transport.Send(addr, &transportpb.TransportMessage{
+	if err := rm.transport.Send(sendCtx, addr, &transportpb.TransportMessage{
 		Body: &transportpb.TransportMessage_RoomCommand{RoomCommand: cmd},
 	}); err != nil {
 		return nil, err
 	}
 
 	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	case <-sendCtx.Done():
+		return nil, fmt.Errorf("room command %s timed out: %w", cmd.Type, sendCtx.Err())
 	case result := <-respCh:
 		if result == nil {
 			return nil, fmt.Errorf("room command %s returned no result", cmd.Type)
@@ -292,8 +301,6 @@ func (rm *RoomManager) withRoomControl(ctx context.Context, roomID string, cmd *
 			return nil, fmt.Errorf("%s", result.Error)
 		}
 		return result, nil
-	case <-time.After(10 * time.Second):
-		return nil, fmt.Errorf("timed out waiting for room command result")
 	}
 }
 
@@ -318,7 +325,9 @@ func (rm *RoomManager) handleRemoteCommand(ctx context.Context, cmd *messagepb.R
 		rm.logger.Warn("failed to find requester node for room command result", "node_id", cmd.RequesterNodeId, "error", err)
 		return
 	}
-	if err := rm.transport.Send(addr, &transportpb.TransportMessage{
+	replyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := rm.transport.Send(replyCtx, addr, &transportpb.TransportMessage{
 		Body: &transportpb.TransportMessage_RoomCommandResult{RoomCommandResult: result},
 	}); err != nil {
 		rm.logger.Warn("failed to send room command result", "request_id", cmd.RequestId, "error", err)
@@ -576,11 +585,13 @@ func (rm *RoomManager) publishEvent(event *messagepb.RoomEvent) {
 			continue
 		}
 		sent[peer.AdvertiseAddr] = true
-		if err := rm.transport.Send(peer.AdvertiseAddr, &transportpb.TransportMessage{
+		pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := rm.transport.Send(pubCtx, peer.AdvertiseAddr, &transportpb.TransportMessage{
 			Body: &transportpb.TransportMessage_RoomEvent{RoomEvent: event},
 		}); err != nil {
 			rm.logger.Warn("failed to send room event", "room_id", event.RoomId, "peer", peer.NodeID, "error", err)
 		}
+		pubCancel()
 	}
 	if !localDelivered {
 		rm.deliverer.DeliverRoomEventLocal(event)
@@ -602,7 +613,9 @@ func (rm *RoomManager) replyWithError(cmd *messagepb.RoomCommand, err error) {
 		rm.logger.Warn("failed to resolve requester node for error reply", "node_id", cmd.RequesterNodeId, "error", lookupErr)
 		return
 	}
-	if sendErr := rm.transport.Send(addr, &transportpb.TransportMessage{
+	errCtx, errCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer errCancel()
+	if sendErr := rm.transport.Send(errCtx, addr, &transportpb.TransportMessage{
 		Body: &transportpb.TransportMessage_RoomCommandResult{RoomCommandResult: result},
 	}); sendErr != nil {
 		rm.logger.Warn("failed to send room error result", "request_id", cmd.RequestId, "error", sendErr)

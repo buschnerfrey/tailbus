@@ -57,7 +57,7 @@ func (r *MessageRouter) SetAckTracker(at *AckTracker) {
 }
 
 // Route routes an envelope to the appropriate destination.
-func (r *MessageRouter) Route(_ context.Context, env *messagepb.Envelope) error {
+func (r *MessageRouter) Route(ctx context.Context, env *messagepb.Envelope) error {
 	start := time.Now()
 
 	// Check if the destination is local
@@ -79,7 +79,7 @@ func (r *MessageRouter) Route(_ context.Context, env *messagepb.Envelope) error 
 	msg := &transportpb.TransportMessage{
 		Body: &transportpb.TransportMessage_Envelope{Envelope: env},
 	}
-	if err := r.transport.Send(peer.AdvertiseAddr, msg); err != nil {
+	if err := r.transport.Send(ctx, peer.AdvertiseAddr, msg); err != nil {
 		return err
 	}
 

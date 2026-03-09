@@ -42,7 +42,7 @@ func TestRecvLoopCleansUpPeer(t *testing.T) {
 		MessageId: "msg-1",
 		Payload:   []byte("hello"),
 	}
-	if err := client.Send(addr, &transportpb.TransportMessage{
+	if err := client.Send(context.Background(), addr, &transportpb.TransportMessage{
 		Body: &transportpb.TransportMessage_Envelope{Envelope: env},
 	}); err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestContextCancellationClosesStreams(t *testing.T) {
 		MessageId: "msg-1",
 		Payload:   []byte("hello"),
 	}
-	if err := client.Send(addr, &transportpb.TransportMessage{
+	if err := client.Send(context.Background(), addr, &transportpb.TransportMessage{
 		Body: &transportpb.TransportMessage_Envelope{Envelope: env},
 	}); err != nil {
 		t.Fatal(err)
@@ -131,6 +131,43 @@ func TestContextCancellationClosesStreams(t *testing.T) {
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
+	}
+}
+
+func TestSendRespectsContextDeadline(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	// Listen but never accept — simulates an unreachable peer where TCP SYN
+	// goes into the void (connection establishment blocks).
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := lis.Addr().String()
+	lis.Close() // close immediately so no one is listening
+
+	client := NewGRPCTransport(logger, nil, nil)
+	client.Start(context.Background())
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err = client.Send(ctx, addr, &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_Envelope{
+			Envelope: &messagepb.Envelope{MessageId: "msg-timeout", Payload: []byte("hello")},
+		},
+	})
+
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected Send to fail with deadline")
+	}
+	// Should return within ~1s (generous margin for CI). The key assertion is
+	// that it does NOT hang for the default gRPC dial timeout (~20s+).
+	if elapsed > 5*time.Second {
+		t.Fatalf("Send took %v, expected it to respect the 500ms context deadline", elapsed)
 	}
 }
 
@@ -173,7 +210,7 @@ func TestMTLSRejectsUnknownPeer(t *testing.T) {
 	knownClient := NewGRPCTransport(logger, &cert2, knownVerifier)
 	knownClient.Start(context.Background())
 
-	err = knownClient.Send(addr, &transportpb.TransportMessage{
+	err = knownClient.Send(context.Background(), addr, &transportpb.TransportMessage{
 		Body: &transportpb.TransportMessage_Envelope{
 			Envelope: &messagepb.Envelope{MessageId: "msg-ok", Payload: []byte("hello")},
 		},
@@ -188,7 +225,7 @@ func TestMTLSRejectsUnknownPeer(t *testing.T) {
 	unknownClient := NewGRPCTransport(logger, &certUnknown, unknownVerifier)
 	unknownClient.Start(context.Background())
 
-	err = unknownClient.Send(addr, &transportpb.TransportMessage{
+	err = unknownClient.Send(context.Background(), addr, &transportpb.TransportMessage{
 		Body: &transportpb.TransportMessage_Envelope{
 			Envelope: &messagepb.Envelope{MessageId: "msg-bad", Payload: []byte("hello")},
 		},

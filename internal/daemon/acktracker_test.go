@@ -13,7 +13,7 @@ import (
 
 func TestTrackAndAcknowledge(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	at := NewAckTracker(func(string, *messagepb.Envelope) error { return nil }, logger)
+	at := NewAckTracker(func(context.Context, string, *messagepb.Envelope) error { return nil }, logger)
 
 	env := &messagepb.Envelope{MessageId: "msg-1"}
 	at.Track(env, "10.0.0.1:9443")
@@ -42,7 +42,7 @@ func TestRetryOnTimeout(t *testing.T) {
 	var retryCount atomic.Int32
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	at := NewAckTracker(func(addr string, env *messagepb.Envelope) error {
+	at := NewAckTracker(func(_ context.Context, addr string, env *messagepb.Envelope) error {
 		retryCount.Add(1)
 		return nil
 	}, logger)
@@ -73,7 +73,7 @@ func TestRetryOnTimeout(t *testing.T) {
 func TestDropAfterMaxRetries(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	at := NewAckTracker(func(string, *messagepb.Envelope) error { return nil }, logger)
+	at := NewAckTracker(func(context.Context, string, *messagepb.Envelope) error { return nil }, logger)
 	at.timeout = 10 * time.Millisecond
 	at.maxRetries = 2
 
@@ -103,7 +103,7 @@ func TestRetryPersistsUpdatedRetryCount(t *testing.T) {
 	ms := testStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	at := NewAckTracker(func(string, *messagepb.Envelope) error { return nil }, logger)
+	at := NewAckTracker(func(context.Context, string, *messagepb.Envelope) error { return nil }, logger)
 	at.SetStore(ms)
 	at.timeout = 0
 
@@ -127,7 +127,7 @@ func TestDropRemovesPendingFromStore(t *testing.T) {
 	ms := testStore(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	at := NewAckTracker(func(string, *messagepb.Envelope) error { return nil }, logger)
+	at := NewAckTracker(func(context.Context, string, *messagepb.Envelope) error { return nil }, logger)
 	at.SetStore(ms)
 	at.timeout = 0
 	at.maxRetries = 0

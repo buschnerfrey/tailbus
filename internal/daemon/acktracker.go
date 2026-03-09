@@ -25,7 +25,7 @@ type pendingMessage struct {
 type AckTracker struct {
 	mu         sync.Mutex
 	pending    map[string]*pendingMessage // messageID -> pending
-	sendFn     func(addr string, env *messagepb.Envelope) error
+	sendFn     func(ctx context.Context, addr string, env *messagepb.Envelope) error
 	logger     *slog.Logger
 	timeout    time.Duration
 	maxRetries int
@@ -33,7 +33,7 @@ type AckTracker struct {
 }
 
 // NewAckTracker creates a new ACK tracker.
-func NewAckTracker(sendFn func(addr string, env *messagepb.Envelope) error, logger *slog.Logger) *AckTracker {
+func NewAckTracker(sendFn func(ctx context.Context, addr string, env *messagepb.Envelope) error, logger *slog.Logger) *AckTracker {
 	return &AckTracker{
 		pending:    make(map[string]*pendingMessage),
 		sendFn:     sendFn,
@@ -150,9 +150,11 @@ func (a *AckTracker) sweep() {
 
 	// Retry outside the lock
 	for _, pm := range retryList {
-		if err := a.sendFn(pm.peerAddr, pm.env); err != nil {
+		retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := a.sendFn(retryCtx, pm.peerAddr, pm.env); err != nil {
 			a.logger.Warn("retry send failed", "message_id", pm.env.MessageId, "error", err)
 		}
+		retryCancel()
 		var retrySentAt time.Time
 		var retryCount int
 		a.mu.Lock()
