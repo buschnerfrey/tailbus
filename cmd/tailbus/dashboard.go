@@ -92,6 +92,25 @@ var (
 	queueWarnStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("220"))
 
+	stalledTurnStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("214")).
+				Bold(true)
+
+	workingTurnDotStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("42")).
+				Bold(true)
+
+	stalledTurnDotStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("220")).
+				Bold(true)
+
+	errorTurnDotStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("196")).
+				Bold(true)
+
+	idleTurnDotStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15"))
+
 	flashEdgeStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("51")).
 			Bold(true)
@@ -144,6 +163,15 @@ type busyTurn struct {
 	lastUpdate time.Time
 }
 
+type handleTurnState string
+
+const (
+	handleTurnIdle    handleTurnState = "idle"
+	handleTurnWorking handleTurnState = "working"
+	handleTurnStalled handleTurnState = "stalled"
+	handleTurnError   handleTurnState = "error"
+)
+
 // topoNode represents a node in the topology view.
 type topoNode struct {
 	id           string
@@ -178,17 +206,18 @@ type reconnectingActivityStream struct {
 }
 
 type dashboardModel struct {
-	client    dashboardClient
-	status    *agentpb.GetNodeStatusResponse
-	activity  []activityEntry
-	flashes   []edgeFlash
-	busyTurns map[string]busyTurn
-	animFrame int
-	width     int
-	height    int
-	err       error
-	quitting  bool
-	topView   topViewMode
+	client           dashboardClient
+	status           *agentpb.GetNodeStatusResponse
+	activity         []activityEntry
+	flashes          []edgeFlash
+	busyTurns        map[string]busyTurn
+	handleLastStatus map[string]handleTurnState
+	animFrame        int
+	width            int
+	height           int
+	err              error
+	quitting         bool
+	topView          topViewMode
 }
 
 type activityEntry struct {
@@ -201,8 +230,9 @@ const maxActivity = 50
 
 func newDashboardModel(client dashboardClient) dashboardModel {
 	return dashboardModel{
-		client:    client,
-		busyTurns: make(map[string]busyTurn),
+		client:           client,
+		busyTurns:        make(map[string]busyTurn),
+		handleLastStatus: make(map[string]handleTurnState),
 	}
 }
 
@@ -427,6 +457,7 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.watchNext
 			}
 			m.updateBusyTurns(e.RoomMessagePosted, now)
+			m.updateHandleTurnState(e.RoomMessagePosted)
 			for _, member := range e.RoomMessagePosted.MemberHandles {
 				if member == "" || member == e.RoomMessagePosted.FromHandle {
 					continue
@@ -673,15 +704,111 @@ func (m *dashboardModel) updateBusyTurns(event *agentpb.RoomMessagePostedEvent, 
 	}
 }
 
+func (m *dashboardModel) updateHandleTurnState(event *agentpb.RoomMessagePostedEvent) {
+	if event == nil {
+		return
+	}
+	switch event.ContentKind {
+	case "turn_request", "turn_progress":
+		target := event.TargetHandle
+		if target == "" {
+			target = event.FromHandle
+		}
+		if target != "" {
+			delete(m.handleLastStatus, target)
+		}
+	case "turn_timeout":
+		target := event.TargetHandle
+		if target == "" {
+			target = event.FromHandle
+		}
+		if target != "" {
+			m.handleLastStatus[target] = handleTurnError
+		}
+	default:
+		if !isTurnReplyKind(event.ContentKind) {
+			return
+		}
+		handle := event.FromHandle
+		if handle == "" {
+			handle = event.TargetHandle
+		}
+		if handle == "" {
+			return
+		}
+		if event.Status == "" || event.Status == "ok" {
+			delete(m.handleLastStatus, handle)
+		} else {
+			m.handleLastStatus[handle] = handleTurnError
+		}
+	}
+}
+
 func (m *dashboardModel) pruneBusyTurns(now time.Time) {
 	for turnID, turn := range m.busyTurns {
 		last := turn.lastUpdate
 		if last.IsZero() {
 			last = turn.since
 		}
-		if !last.IsZero() && now.Sub(last) > busyTurnStaleAfter {
-			delete(m.busyTurns, turnID)
+		if !last.IsZero() && now.Sub(last) > busyTurnStaleAfter && turn.status == "working" {
+			turn.status = "stalled"
+			m.busyTurns[turnID] = turn
 		}
+	}
+}
+
+func (m dashboardModel) handleState(handle string) handleTurnState {
+	if handle == "" {
+		return handleTurnIdle
+	}
+	state := handleTurnIdle
+	for _, turn := range m.busyTurns {
+		if turn.toHandle != handle {
+			continue
+		}
+		switch turn.status {
+		case "working":
+			return handleTurnWorking
+		case "stalled":
+			state = handleTurnStalled
+		}
+	}
+	if state == handleTurnStalled {
+		return state
+	}
+	if m.handleLastStatus[handle] == handleTurnError {
+		return handleTurnError
+	}
+	return handleTurnIdle
+}
+
+func (m dashboardModel) nodeState(n topoNode) handleTurnState {
+	state := handleTurnIdle
+	for _, handle := range n.handles {
+		switch m.handleState(handle) {
+		case handleTurnWorking:
+			return handleTurnWorking
+		case handleTurnStalled:
+			state = handleTurnStalled
+		case handleTurnError:
+			if state != handleTurnStalled {
+				state = handleTurnError
+			}
+		}
+	}
+	return state
+}
+
+func dotStyleForState(state handleTurnState) lipgloss.Style {
+	switch state {
+	case handleTurnWorking:
+		return workingTurnDotStyle
+	case handleTurnStalled:
+		return stalledTurnDotStyle
+	case handleTurnError:
+		return errorTurnDotStyle
+	default:
+		return idleTurnDotStyle
 	}
 }
 
@@ -722,14 +849,6 @@ func (m dashboardModel) flashDirBetween(a, b topoNode) flashDirection {
 			dir |= flashBtoA
 		}
 	}
-	for _, bt := range m.busyTurns {
-		if aHandles[bt.fromHandle] && bHandles[bt.toHandle] {
-			dir |= flashAtoB
-		}
-		if bHandles[bt.fromHandle] && aHandles[bt.toHandle] {
-			dir |= flashBtoA
-		}
-	}
 	return dir
 }
 
@@ -741,11 +860,6 @@ func (m dashboardModel) isNodeActive(n topoNode) bool {
 	}
 	for _, f := range m.flashes {
 		if handles[f.toHandle] {
-			return true
-		}
-	}
-	for _, bt := range m.busyTurns {
-		if handles[bt.toHandle] {
 			return true
 		}
 	}
@@ -932,6 +1046,8 @@ func (m dashboardModel) renderTopologyCompact(nodes []topoNode, width int) strin
 	for _, n := range nodes {
 		var icon, label, suffix string
 		activeH := m.activeHandlesFor(n)
+		nodeState := m.nodeState(n)
+		dotStyle := dotStyleForState(nodeState)
 
 		if n.isRelay {
 			if n.connected {
@@ -946,7 +1062,7 @@ func (m dashboardModel) renderTopologyCompact(nodes []topoNode, width int) strin
 			label = relayNodeStyle.Render(n.id)
 			suffix = " " + helpStyle.Render(status)
 		} else if n.isLocal {
-			icon = localNodeStyle.Render("\u25cf")
+			icon = dotStyle.Render("\u25cf")
 			label = localNodeStyle.Render(n.id) + helpStyle.Render(" (this node)")
 			if len(n.handles) > 0 {
 				suffix = ": " + renderHandleList(n.handles, activeH, m.animFrame)
@@ -954,7 +1070,7 @@ func (m dashboardModel) renderTopologyCompact(nodes []topoNode, width int) strin
 		} else {
 			switch n.connectivity {
 			case "direct":
-				icon = connectedStyle.Render("\u25cf")
+				icon = dotStyle.Render("\u25cf")
 				label = remoteNodeStyle.Render(n.id)
 				suffix = " " + helpStyle.Render("[direct]")
 			case "relay":
@@ -1013,7 +1129,7 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 	// Build local node box
 	localActive := m.isNodeActive(local)
 	localActiveHandles := m.activeHandlesFor(local)
-	localBox := renderNodeBox(local, true, localActive, localActiveHandles, m.animFrame)
+	localBox := renderNodeBox(local, true, m.nodeState(local), localActive, localActiveHandles, m.animFrame)
 
 	if len(remotes) == 0 {
 		b.WriteString(localBox)
@@ -1042,7 +1158,7 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 	for i, remote := range remotes {
 		remoteActive := m.isNodeActive(remote)
 		remoteActiveHandles := m.activeHandlesFor(remote)
-		remoteBox := renderNodeBox(remote, false, remoteActive, remoteActiveHandles, m.animFrame)
+		remoteBox := renderNodeBox(remote, false, m.nodeState(remote), remoteActive, remoteActiveHandles, m.animFrame)
 		flashDir := m.flashDirBetween(local, remote)
 		edge := renderEdge(remote, maxLocalW, flashDir, m.animFrame)
 
@@ -1124,7 +1240,7 @@ func renderHandleList(handles []string, active map[string]bool, animFrame int) s
 }
 
 // activeHandlesFor returns the set of handles on a node that are destinations
-// of active flashes (i.e. currently receiving messages).
+// of recent message flashes.
 func (m dashboardModel) activeHandlesFor(n topoNode) map[string]bool {
 	result := make(map[string]bool)
 	handles := make(map[string]bool, len(n.handles))
@@ -1134,11 +1250,6 @@ func (m dashboardModel) activeHandlesFor(n topoNode) map[string]bool {
 	for _, f := range m.flashes {
 		if handles[f.toHandle] {
 			result[f.toHandle] = true
-		}
-	}
-	for _, bt := range m.busyTurns {
-		if handles[bt.toHandle] {
-			result[bt.toHandle] = true
 		}
 	}
 	return result
@@ -1167,7 +1278,7 @@ func shimmerText(text string, frame int, baseStyle, highlightStyle lipgloss.Styl
 }
 
 // renderNodeBox renders an ASCII box for a topology node.
-func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[string]bool, animFrame int) string {
+func renderNodeBox(n topoNode, isLocal bool, state handleTurnState, active bool, activeHandles map[string]bool, animFrame int) string {
 	// Determine box width
 	nameLen := len(n.id)
 	maxContent := nameLen + 4 // icon + space + name + padding
@@ -1199,6 +1310,7 @@ func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[stri
 
 	// Node name line with icon
 	icon := "\u25cf" // ●
+	iconStyle := dotStyleForState(state)
 	var nameStyle lipgloss.Style
 	if isLocal {
 		nameStyle = localNodeStyle
@@ -1227,8 +1339,8 @@ func renderNodeBox(n topoNode, isLocal bool, active bool, activeHandles map[stri
 	} else {
 		renderedName = nameStyle.Render(name)
 	}
-	nameLine := icon + " " + renderedName
-	nameW := lipgloss.Width(icon+" ") + lipgloss.Width(nameStyle.Render(name))
+	nameLine := iconStyle.Render(icon) + " " + renderedName
+	nameW := lipgloss.Width(iconStyle.Render(icon)+" ") + lipgloss.Width(nameStyle.Render(name))
 	padR := innerW - nameW + 2
 	if padR < 0 {
 		padR = 0
@@ -1649,7 +1761,11 @@ func (m dashboardModel) renderHandlesSessions(width, maxLines int) string {
 			if shown >= workLimit {
 				break
 			}
-			line := fmt.Sprintf("  %s r%d %s (%s)", turn.toHandle, turn.round, shimmerText("working", m.animFrame, helpStyle, flashNodeStyle), time.Since(turn.since).Round(time.Second))
+			statusText := stalledTurnStyle.Render(turn.status)
+			if turn.status == "working" {
+				statusText = shimmerText("working", m.animFrame, helpStyle, flashNodeStyle)
+			}
+			line := fmt.Sprintf("  %s r%d %s (%s)", turn.toHandle, turn.round, statusText, time.Since(turn.since).Round(time.Second))
 			if lipgloss.Width(line) > width-2 {
 				line = line[:width-2]
 			}

@@ -431,7 +431,7 @@ func TestActivityEntryShortensShortSessionIDsSafely(t *testing.T) {
 	}
 }
 
-func TestDashboardPrunesStaleBusyTurns(t *testing.T) {
+func TestDashboardMarksStaleBusyTurnsAsStalled(t *testing.T) {
 	model := newDashboardModel(&fakeDashboardClient{})
 	now := time.Now()
 	model.busyTurns["stale"] = busyTurn{
@@ -439,6 +439,7 @@ func TestDashboardPrunesStaleBusyTurns(t *testing.T) {
 		fromHandle: "task-orchestrator",
 		toHandle:   "implementer",
 		since:      now.Add(-busyTurnStaleAfter - time.Second),
+		status:     "working",
 		lastUpdate: now.Add(-busyTurnStaleAfter - time.Second),
 	}
 	model.busyTurns["fresh"] = busyTurn{
@@ -446,23 +447,141 @@ func TestDashboardPrunesStaleBusyTurns(t *testing.T) {
 		fromHandle: "task-orchestrator",
 		toHandle:   "critic",
 		since:      now,
+		status:     "working",
 		lastUpdate: now,
 	}
 
 	next, _ := model.Update(animTickMsg(now))
 	updated := next.(dashboardModel)
-	if _, ok := updated.busyTurns["stale"]; ok {
-		t.Fatal("expected stale busy turn to be pruned")
+	stale, ok := updated.busyTurns["stale"]
+	if !ok {
+		t.Fatal("expected stale busy turn to remain visible")
+	}
+	if stale.status != "stalled" {
+		t.Fatalf("expected stale busy turn to be marked stalled, got %q", stale.status)
 	}
 	if _, ok := updated.busyTurns["fresh"]; !ok {
 		t.Fatal("expected fresh busy turn to remain")
 	}
 }
 
+func TestStalledBusyTurnIsNotRenderedAsActive(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+	model.busyTurns["stalled"] = busyTurn{
+		turnID:     "stalled",
+		fromHandle: "task-orchestrator",
+		toHandle:   "critic",
+		status:     "stalled",
+	}
+
+	local := topoNode{handles: []string{"task-orchestrator"}}
+	remote := topoNode{handles: []string{"critic"}}
+	if dir := model.flashDirBetween(local, remote); dir != flashNone {
+		t.Fatalf("expected stalled turn to produce no active flow, got %v", dir)
+	}
+	if active := model.activeHandlesFor(remote); len(active) != 0 {
+		t.Fatalf("expected stalled turn not to mark active handles, got %v", active)
+	}
+}
+
+func TestWorkingBusyTurnDoesNotRenderNodeAsActive(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+	model.busyTurns["working"] = busyTurn{
+		turnID:     "working",
+		fromHandle: "task-orchestrator",
+		toHandle:   "critic",
+		status:     "working",
+	}
+
+	local := topoNode{handles: []string{"task-orchestrator"}}
+	remote := topoNode{handles: []string{"critic"}}
+	if dir := model.flashDirBetween(local, remote); dir != flashNone {
+		t.Fatalf("expected working busy turn to produce no edge flash, got %v", dir)
+	}
+	if model.isNodeActive(remote) {
+		t.Fatal("expected working busy turn not to mark node active")
+	}
+	if active := model.activeHandlesFor(remote); len(active) != 0 {
+		t.Fatalf("expected working busy turn not to mark active handles, got %v", active)
+	}
+}
+
+func TestNodeStateUsesBusyTurnAndReplyStatus(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+	node := topoNode{handles: []string{"implementer"}}
+
+	if state := model.nodeState(node); state != handleTurnIdle {
+		t.Fatalf("idle nodeState = %q, want %q", state, handleTurnIdle)
+	}
+
+	model.handleLastStatus["implementer"] = handleTurnError
+	if state := model.nodeState(node); state != handleTurnError {
+		t.Fatalf("error nodeState = %q, want %q", state, handleTurnError)
+	}
+
+	model.busyTurns["turn-1"] = busyTurn{
+		turnID:   "turn-1",
+		toHandle: "implementer",
+		status:   "stalled",
+	}
+	if state := model.nodeState(node); state != handleTurnStalled {
+		t.Fatalf("stalled nodeState = %q, want %q", state, handleTurnStalled)
+	}
+
+	model.busyTurns["turn-1"] = busyTurn{
+		turnID:   "turn-1",
+		toHandle: "implementer",
+		status:   "working",
+	}
+	if state := model.nodeState(node); state != handleTurnWorking {
+		t.Fatalf("working nodeState = %q, want %q", state, handleTurnWorking)
+	}
+}
+
+func TestUpdateHandleTurnStateTracksFailuresAndClearsOnSuccess(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+
+	model.updateHandleTurnState(&agentpb.RoomMessagePostedEvent{
+		TargetHandle: "implementer",
+		ContentKind:  "turn_timeout",
+	})
+	if got := model.handleLastStatus["implementer"]; got != handleTurnError {
+		t.Fatalf("timeout state = %q, want %q", got, handleTurnError)
+	}
+
+	model.updateHandleTurnState(&agentpb.RoomMessagePostedEvent{
+		FromHandle:   "implementer",
+		ContentKind:  "implement_reply",
+		Status:       "ok",
+		TargetHandle: "implementer",
+	})
+	if _, ok := model.handleLastStatus["implementer"]; ok {
+		t.Fatal("expected successful reply to clear error state")
+	}
+
+	model.updateHandleTurnState(&agentpb.RoomMessagePostedEvent{
+		FromHandle:   "implementer",
+		ContentKind:  "implement_reply",
+		Status:       "error",
+		TargetHandle: "implementer",
+	})
+	if got := model.handleLastStatus["implementer"]; got != handleTurnError {
+		t.Fatalf("reply error state = %q, want %q", got, handleTurnError)
+	}
+
+	model.updateHandleTurnState(&agentpb.RoomMessagePostedEvent{
+		TargetHandle: "implementer",
+		ContentKind:  "turn_request",
+	})
+	if _, ok := model.handleLastStatus["implementer"]; ok {
+		t.Fatal("expected new turn request to clear prior error state")
+	}
+}
+
 func TestRenderNodeBoxActiveBorderAnimates(t *testing.T) {
 	node := topoNode{id: "implement-node", handles: []string{"implementer"}}
-	boxA := renderNodeBox(node, false, true, map[string]bool{"implementer": true}, 0)
-	boxB := renderNodeBox(node, false, true, map[string]bool{"implementer": true}, 6)
+	boxA := renderNodeBox(node, false, handleTurnWorking, true, map[string]bool{"implementer": true}, 0)
+	boxB := renderNodeBox(node, false, handleTurnWorking, true, map[string]bool{"implementer": true}, 6)
 	if boxA == boxB {
 		t.Fatal("expected active node border rendering to vary across animation frames")
 	}
