@@ -429,6 +429,10 @@ class AsyncAgent:
                     future: asyncio.Future[Response] | None = None
                     if request_id:
                         future = self._pending.get(request_id)
+                        try:
+                            self._pending_order.remove(request_id)
+                        except ValueError:
+                            pass
                     else:
                         while self._pending_order:
                             pending_id = self._pending_order.popleft()
