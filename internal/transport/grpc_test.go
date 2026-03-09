@@ -14,6 +14,32 @@ import (
 	"github.com/alexanderfrey/tailbus/internal/identity"
 )
 
+func startHangingListener(t *testing.T) (string, func()) {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, err := lis.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				<-done
+				_ = c.Close()
+			}(conn)
+		}
+	}()
+	return lis.Addr().String(), func() {
+		_ = lis.Close()
+		<-done
+	}
+}
+
 func TestRecvLoopCleansUpPeer(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -137,14 +163,8 @@ func TestContextCancellationClosesStreams(t *testing.T) {
 func TestSendRespectsContextDeadline(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	// Listen but never accept — simulates an unreachable peer where TCP SYN
-	// goes into the void (connection establishment blocks).
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := lis.Addr().String()
-	lis.Close() // close immediately so no one is listening
+	addr, cleanup := startHangingListener(t)
+	defer cleanup()
 
 	client := NewGRPCTransport(logger, nil, nil)
 	client.Start(context.Background())
@@ -154,7 +174,7 @@ func TestSendRespectsContextDeadline(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	err = client.Send(ctx, addr, &transportpb.TransportMessage{
+	err := client.Send(ctx, addr, &transportpb.TransportMessage{
 		Body: &transportpb.TransportMessage_Envelope{
 			Envelope: &messagepb.Envelope{MessageId: "msg-timeout", Payload: []byte("hello")},
 		},
@@ -168,6 +188,46 @@ func TestSendRespectsContextDeadline(t *testing.T) {
 	// that it does NOT hang for the default gRPC dial timeout (~20s+).
 	if elapsed > 5*time.Second {
 		t.Fatalf("Send took %v, expected it to respect the 500ms context deadline", elapsed)
+	}
+}
+
+func TestRelaySendRespectsContextDeadline(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	relayAddr, cleanupRelay := startHangingListener(t)
+	defer cleanupRelay()
+
+	resolver := handle.NewResolver()
+	resolver.UpdatePeerMap(map[string]handle.PeerInfo{
+		"target": {NodeID: "node-target", AdvertiseAddr: "10.255.255.1:9443", PublicKey: []byte("peer-key")},
+	})
+	resolver.UpdateRelays([]handle.RelayInfo{{Addr: relayAddr}})
+
+	client := NewGRPCTransport(logger, nil, nil)
+	client.SetResolver(resolver)
+	client.Start(context.Background())
+	defer client.Close()
+
+	client.relayMu.Lock()
+	client.directFails["10.255.255.1:9443"] = time.Now()
+	client.relayMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := client.Send(ctx, "10.255.255.1:9443", &transportpb.TransportMessage{
+		Body: &transportpb.TransportMessage_Envelope{
+			Envelope: &messagepb.Envelope{MessageId: "msg-relay-timeout", Payload: []byte("hello")},
+		},
+	})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected relay Send to fail with deadline")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("relay Send took %v, expected it to respect the 500ms context deadline", elapsed)
 	}
 }
 

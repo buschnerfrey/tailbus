@@ -36,17 +36,22 @@ type GRPCTransport struct {
 	peers map[string]*peerConn // addr -> peer connection
 	ctx   context.Context      // daemon lifetime context
 
-	localPubKey []byte                     // local node's public key (for relay metadata)
-	resolver    *handle.Resolver           // for relay addr lookup + pubkey reverse-lookup
+	localPubKey []byte           // local node's public key (for relay metadata)
+	resolver    *handle.Resolver // for relay addr lookup + pubkey reverse-lookup
 	relayMu     sync.Mutex
-	relayConns  map[string]*peerConn       // relay addr → connection
-	directFails map[string]time.Time       // peer addr → last direct failure time
+	relayConns  map[string]*peerConn // relay addr → connection
+	directFails map[string]time.Time // peer addr → last direct failure time
 }
 
 type peerConn struct {
 	conn   *grpc.ClientConn
 	stream transportpb.NodeTransport_ExchangeClient
 	mu     sync.Mutex
+}
+
+type exchangeResult struct {
+	stream transportpb.NodeTransport_ExchangeClient
+	err    error
 }
 
 // NewGRPCTransport creates a new gRPC-based transport.
@@ -164,9 +169,7 @@ func (t *GRPCTransport) sendDirect(ctx context.Context, addr string, msg *transp
 		return err
 	}
 
-	pc.mu.Lock()
-	err = pc.stream.Send(msg)
-	pc.mu.Unlock()
+	err = t.sendOnPeer(ctx, pc, msg)
 
 	if err == nil {
 		if t.sendFn != nil {
@@ -182,6 +185,9 @@ func (t *GRPCTransport) sendDirect(ctx context.Context, addr string, msg *transp
 		pc.conn.Close()
 	}
 	t.mu.Unlock()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 
 	// Reconnect outside the lock
 	pc2, cerr := t.connect(ctx, addr)
@@ -200,9 +206,7 @@ func (t *GRPCTransport) sendDirect(ctx context.Context, addr string, msg *transp
 		t.mu.Unlock()
 	}
 
-	pc2.mu.Lock()
-	defer pc2.mu.Unlock()
-	if err := pc2.stream.Send(msg); err != nil {
+	if err := t.sendOnPeer(ctx, pc2, msg); err != nil {
 		return err
 	}
 	if t.sendFn != nil {
@@ -212,7 +216,7 @@ func (t *GRPCTransport) sendDirect(ctx context.Context, addr string, msg *transp
 }
 
 // sendViaRelay sends a transport message through a relay server.
-func (t *GRPCTransport) sendViaRelay(_ context.Context, peerAddr string, msg *transportpb.TransportMessage) error {
+func (t *GRPCTransport) sendViaRelay(ctx context.Context, peerAddr string, msg *transportpb.TransportMessage) error {
 	// Look up the target's pubkey from the resolver by matching addr
 	targetKey := t.pubkeyForAddr(peerAddr)
 	if targetKey == nil {
@@ -229,14 +233,12 @@ func (t *GRPCTransport) sendViaRelay(_ context.Context, peerAddr string, msg *tr
 
 	// Try first available relay
 	for _, relay := range relays {
-		pc, err := t.getOrConnectRelay(relay.Addr)
+		pc, err := t.getOrConnectRelay(ctx, relay.Addr)
 		if err != nil {
 			t.logger.Warn("relay connection failed", "relay", relay.Addr, "error", err)
 			continue
 		}
-		pc.mu.Lock()
-		err = pc.stream.Send(msg)
-		pc.mu.Unlock()
+		err = t.sendOnRelay(ctx, relay.Addr, pc, msg)
 		if err != nil {
 			t.logger.Warn("relay send failed", "relay", relay.Addr, "error", err)
 			continue
@@ -265,24 +267,32 @@ func (t *GRPCTransport) pubkeyForAddr(addr string) []byte {
 }
 
 // getOrConnectRelay returns an existing or new relay connection.
-func (t *GRPCTransport) getOrConnectRelay(addr string) (*peerConn, error) {
+func (t *GRPCTransport) getOrConnectRelay(ctx context.Context, addr string) (*peerConn, error) {
 	t.relayMu.Lock()
-	defer t.relayMu.Unlock()
-
 	if pc, ok := t.relayConns[addr]; ok {
+		t.relayMu.Unlock()
 		return pc, nil
 	}
+	t.relayMu.Unlock()
 
-	pc, err := t.connectRelay(addr)
+	pc, err := t.connectRelay(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
+
+	t.relayMu.Lock()
+	if existing, ok := t.relayConns[addr]; ok {
+		t.relayMu.Unlock()
+		pc.conn.Close()
+		return existing, nil
+	}
 	t.relayConns[addr] = pc
+	t.relayMu.Unlock()
 	return pc, nil
 }
 
-// connectRelay creates a new relay connection. Must be called with relayMu held.
-func (t *GRPCTransport) connectRelay(addr string) (*peerConn, error) {
+// connectRelay creates a new relay connection without holding relayMu.
+func (t *GRPCTransport) connectRelay(ctx context.Context, addr string) (*peerConn, error) {
 	var dialOpt grpc.DialOption
 	if t.tlsCert != nil {
 		clientTLS := &tls.Config{
@@ -318,7 +328,9 @@ func (t *GRPCTransport) connectRelay(addr string) (*peerConn, error) {
 		streamCtx = metadata.NewOutgoingContext(t.ctx, md)
 	}
 
-	stream, err := client.Exchange(streamCtx)
+	stream, err := t.openExchange(ctx, conn, addr, func() (transportpb.NodeTransport_ExchangeClient, error) {
+		return client.Exchange(streamCtx)
+	})
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("open exchange stream to relay %s: %w", addr, err)
@@ -361,7 +373,7 @@ func (t *GRPCTransport) ConnectToRelays() {
 	}
 	relays := t.resolver.GetRelays()
 	for _, r := range relays {
-		if _, err := t.getOrConnectRelay(r.Addr); err != nil {
+		if _, err := t.getOrConnectRelay(t.ctx, r.Addr); err != nil {
 			t.logger.Warn("failed to connect to relay", "addr", r.Addr, "error", err)
 		}
 	}
@@ -424,18 +436,31 @@ func (t *GRPCTransport) connect(ctx context.Context, addr string) (*peerConn, er
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
 
-	// Race Exchange(t.ctx) against the per-call ctx so we bail out if the
-	// caller's deadline expires, but the stream itself stays bound to the
-	// daemon lifetime context (t.ctx).
-	type exchangeResult struct {
-		stream transportpb.NodeTransport_ExchangeClient
-		err    error
-	}
-	ch := make(chan exchangeResult, 1)
 	client := transportpb.NewNodeTransportClient(conn)
+	stream, err := t.openExchange(ctx, conn, addr, func() (transportpb.NodeTransport_ExchangeClient, error) {
+		return client.Exchange(t.ctx)
+	})
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	pc := &peerConn{conn: conn, stream: stream}
+	go t.recvLoop(addr, pc, stream)
+	t.logger.Info("connected to peer", "addr", addr)
+	return pc, nil
+}
+
+func (t *GRPCTransport) openExchange(
+	ctx context.Context,
+	conn *grpc.ClientConn,
+	addr string,
+	open func() (transportpb.NodeTransport_ExchangeClient, error),
+) (transportpb.NodeTransport_ExchangeClient, error) {
+	ch := make(chan exchangeResult, 1)
 	go func() {
-		s, e := client.Exchange(t.ctx)
-		ch <- exchangeResult{s, e}
+		s, e := open()
+		ch <- exchangeResult{stream: s, err: e}
 	}()
 
 	select {
@@ -444,13 +469,49 @@ func (t *GRPCTransport) connect(ctx context.Context, addr string) (*peerConn, er
 		return nil, fmt.Errorf("connect to %s: %w", addr, ctx.Err())
 	case res := <-ch:
 		if res.err != nil {
-			conn.Close()
 			return nil, fmt.Errorf("open exchange stream to %s: %w", addr, res.err)
 		}
-		pc := &peerConn{conn: conn, stream: res.stream}
-		go t.recvLoop(addr, pc, res.stream)
-		t.logger.Info("connected to peer", "addr", addr)
-		return pc, nil
+		return res.stream, nil
+	}
+}
+
+func (t *GRPCTransport) sendOnPeer(ctx context.Context, pc *peerConn, msg *transportpb.TransportMessage) error {
+	return t.sendOnConn(ctx, pc, msg, nil)
+}
+
+func (t *GRPCTransport) sendOnRelay(ctx context.Context, relayAddr string, pc *peerConn, msg *transportpb.TransportMessage) error {
+	return t.sendOnConn(ctx, pc, msg, func() {
+		t.relayMu.Lock()
+		if current, ok := t.relayConns[relayAddr]; ok && current == pc {
+			delete(t.relayConns, relayAddr)
+		}
+		t.relayMu.Unlock()
+	})
+}
+
+func (t *GRPCTransport) sendOnConn(
+	ctx context.Context,
+	pc *peerConn,
+	msg *transportpb.TransportMessage,
+	remove func(),
+) error {
+	errCh := make(chan error, 1)
+	go func() {
+		pc.mu.Lock()
+		err := pc.stream.Send(msg)
+		pc.mu.Unlock()
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		if remove != nil {
+			remove()
+		}
+		_ = pc.conn.Close()
+		return ctx.Err()
 	}
 }
 
