@@ -36,6 +36,9 @@ fail() { echo -e "  ${DIM}run.sh${RESET}  ${RED}✗${RESET} $*"; exit 1; }
 
 scenario_text() {
     case "$1" in
+        focus-timer)
+            printf '%s' "Build a small self-contained Python focus timer app in about 100 lines using only the standard library. Make it runnable from the terminal, support configurable work and break durations, show a live countdown, and include a couple of unit tests for the core timer-state logic."
+            ;;
         snake-clone)
             printf '%s' "Build a simple Snake clone in Python using only the standard library. Include a playable interface, food spawning, score tracking, wall and self collision, restart handling, and unit tests for the core game logic."
             ;;
@@ -56,11 +59,13 @@ print_scenarios() {
     echo -e "  ${BOLD}Dev Task scenarios${RESET}"
     echo -e "  ${DIM}────────────────────────────────────────${RESET}"
     echo ""
+    echo "  focus-timer     build a small terminal Pomodoro timer"
     echo "  snake-clone      build a Snake clone in Python"
     echo "  parser-edge-case fix quoted-comma parsing"
     echo "  todo-filter      make the todo filter case-insensitive"
     echo ""
     echo "  Examples:"
+    echo "    ./run.sh fire focus-timer"
     echo "    ./run.sh fire snake-clone"
     echo "    ./run.sh fire-task \"Add a timeout parameter to the HTTP client and update tests\""
     echo ""

@@ -42,6 +42,7 @@ Then run a curated task:
 
 ```bash
 ./run.sh scenarios
+./run.sh fire focus-timer
 ./run.sh fire snake-clone
 ```
 

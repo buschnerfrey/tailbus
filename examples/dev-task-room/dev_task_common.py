@@ -49,6 +49,7 @@ CYAN = "\033[36m"
 RESET = "\033[0m"
 
 SCENARIOS: dict[str, str] = {
+    "focus-timer": "Build a small self-contained Python focus timer app in about 100 lines using only the standard library. Make it runnable from the terminal, support configurable work and break durations, show a live countdown, and include a couple of unit tests for the core timer-state logic.",
     "snake-clone": "Build a simple Snake clone in Python using only the standard library. Include a playable interface, food spawning, score tracking, wall and self collision, restart handling, and unit tests for the core game logic.",
     "parser-edge-case": "Extend the CSV parser so quoted commas are handled correctly and add coverage for the edge case.",
     "todo-filter": "Make the todo status filter case-insensitive and ensure the tests cover mixed-case input.",
