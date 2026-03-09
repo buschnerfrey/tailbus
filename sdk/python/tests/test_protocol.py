@@ -56,6 +56,11 @@ class TestSerializeCommand(unittest.TestCase):
         self.assertEqual(parsed["manifest"]["capabilities"], ["research.company"])
         self.assertEqual(parsed["manifest"]["domains"], ["finance"])
 
+    def test_command_preserves_request_id(self) -> None:
+        result = serialize_command({"type": "list_rooms", "request_id": "req-1"})
+        parsed = json.loads(result)
+        self.assertEqual(parsed["request_id"], "req-1")
+
 
 class TestParseRegistered(unittest.TestCase):
     def test_parse(self) -> None:
@@ -63,6 +68,11 @@ class TestParseRegistered(unittest.TestCase):
         self.assertIsInstance(resp, Registered)
         assert isinstance(resp, Registered)
         self.assertEqual(resp.handle, "my-agent")
+
+    def test_parse_with_request_id(self) -> None:
+        resp = parse_response('{"type":"registered","handle":"my-agent","request_id":"req-1"}')
+        assert isinstance(resp, Registered)
+        self.assertEqual(resp.request_id, "req-1")
 
 
 class TestParseOpened(unittest.TestCase):
@@ -168,8 +178,10 @@ class TestParseRoomResponses(unittest.TestCase):
     def test_parse_room_created_and_posted(self) -> None:
         created = parse_response('{"type":"room_created","room_id":"room-1"}')
         self.assertIsInstance(created, RoomCreated)
-        posted = parse_response('{"type":"room_posted","event_id":"evt-1","room_seq":3}')
+        posted = parse_response('{"type":"room_posted","event_id":"evt-1","room_seq":3,"request_id":"req-2"}')
         self.assertIsInstance(posted, RoomPosted)
+        assert isinstance(posted, RoomPosted)
+        self.assertEqual(posted.request_id, "req-2")
 
     def test_parse_room_lists(self) -> None:
         rooms = parse_response(

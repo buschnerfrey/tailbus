@@ -76,7 +76,9 @@ class AsyncAgent:
 
         self._process: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task[None] | None = None
-        self._pending: deque[asyncio.Future[Response]] = deque()
+        self._pending: dict[str, asyncio.Future[Response]] = {}
+        self._pending_order: deque[str] = deque()
+        self._next_request_id = 0
         self._is_registered = False
         self._is_started = False
         self._handler: MessageHandler | None = None
@@ -377,16 +379,24 @@ class AsyncAgent:
             raise BridgeDiedError()
 
         future: asyncio.Future[Response] = asyncio.get_running_loop().create_future()
-        self._pending.append(future)
+        self._next_request_id += 1
+        request_id = str(self._next_request_id)
+        cmd = dict(cmd)
+        cmd["request_id"] = request_id
+        self._pending[request_id] = future
+        self._pending_order.append(request_id)
 
         data = serialize_command(cmd)
         self._process.stdin.write(data)
         await self._process.stdin.drain()
 
-        resp = await future
-        if isinstance(resp, Error):
-            raise BridgeError(resp.error, resp.request_type)
-        return resp
+        try:
+            resp = await future
+            if isinstance(resp, Error):
+                raise BridgeError(resp.error, resp.request_type)
+            return resp
+        finally:
+            self._pending.pop(request_id, None)
 
     async def _reader_loop(self) -> None:
         """Background task reading lines from bridge stdout."""
@@ -414,9 +424,19 @@ class AsyncAgent:
 
                 if isinstance(resp, (Message, RoomEvent)):
                     asyncio.create_task(self._dispatch_message(resp))
-                elif self._pending:
-                    future = self._pending.popleft()
-                    if not future.cancelled():
+                else:
+                    request_id = getattr(resp, "request_id", "")
+                    future: asyncio.Future[Response] | None = None
+                    if request_id:
+                        future = self._pending.get(request_id)
+                    else:
+                        while self._pending_order:
+                            pending_id = self._pending_order.popleft()
+                            pending_future = self._pending.get(pending_id)
+                            if pending_future is not None:
+                                future = pending_future
+                                break
+                    if future is not None and not future.cancelled():
                         future.set_result(resp)
         except asyncio.CancelledError:
             return
@@ -436,6 +456,7 @@ class AsyncAgent:
     def _fail_pending(self, exc: Exception) -> None:
         """Fail all pending futures with the given exception."""
         while self._pending:
-            future = self._pending.popleft()
+            _, future = self._pending.popitem()
             if not future.done():
                 future.set_exception(exc)
+        self._pending_order.clear()

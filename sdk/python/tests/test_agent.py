@@ -666,6 +666,37 @@ class TestRoomOps(AsyncAgentTestCase):
 
         asyncio.run(run())
 
+    def test_room_commands_correlate_out_of_order_responses(self) -> None:
+        async def run() -> None:
+            agent = AsyncAgent("test-agent")
+            await agent.start()
+            try:
+                self._queue({"type": "registered", "handle": "test-agent"})
+                await agent.register()
+
+                replay_task = asyncio.create_task(agent.replay_room("room-1"))
+                post_task = asyncio.create_task(agent.post_room_message("room-1", "hello room"))
+                await asyncio.sleep(0.01)
+
+                written = [json.loads(item) for item in self.fake_process.stdin.written]
+                replay_req_id = written[1]["request_id"]
+                post_req_id = written[2]["request_id"]
+
+                # Deliver the responses in the opposite order to prove correlation is by request_id, not FIFO.
+                self._feed({"type": "room_posted", "event_id": "evt-1", "room_seq": 2, "request_id": post_req_id})
+                self._feed({"type": "room_replay", "events": [], "request_id": replay_req_id})
+
+                replay = await replay_task
+                posted = await post_task
+
+                self.assertEqual(replay, [])
+                self.assertIsInstance(posted, RoomPosted)
+                self.assertEqual(posted.event_id, "evt-1")
+            finally:
+                await agent.close()
+
+        asyncio.run(run())
+
 
 class TestContextManager(AsyncAgentTestCase):
     def test_async_context_manager(self) -> None:

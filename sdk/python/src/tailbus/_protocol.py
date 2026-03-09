@@ -119,6 +119,7 @@ class Registered:
     """Confirmation that the agent was registered."""
 
     handle: str
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +129,7 @@ class Opened:
     session: str
     message_id: str
     trace_id: str
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +137,7 @@ class Sent:
     """Confirmation that a message was sent."""
 
     message_id: str
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +145,7 @@ class Resolved:
     """Confirmation that a session was resolved."""
 
     message_id: str
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,32 +198,38 @@ class RoomInfo:
 @dataclass(frozen=True, slots=True)
 class RoomCreated:
     room_id: str
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class RoomPosted:
     event_id: str
     room_seq: int
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class RoomReplay:
     events: tuple[RoomEvent, ...] = ()
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class RoomMembers:
     members: tuple[str, ...] = ()
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class RoomList:
     rooms: tuple[RoomInfo, ...] = ()
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class RoomOpResult:
     ok: bool
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +239,7 @@ class Introspected:
     handle: str
     found: bool
     manifest: Manifest | None = None
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +255,7 @@ class HandleList:
     """List of registered handles."""
 
     entries: tuple[HandleEntry, ...] = ()
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +273,7 @@ class HandleMatches:
     """Ranked discovery matches."""
 
     matches: tuple[HandleMatch, ...] = ()
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +291,7 @@ class SessionList:
     """List of active sessions."""
 
     sessions: tuple[SessionInfo, ...] = ()
+    request_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,6 +300,7 @@ class Error:
 
     error: str
     request_type: str
+    request_id: str = ""
 
 
 Response = Union[
@@ -358,9 +373,13 @@ def _room_event_from_dict(d: dict[str, Any]) -> RoomEvent:
     )
 
 
+def _request_id(d: dict[str, Any]) -> str:
+    return d.get("request_id", "")
+
+
 @_register_parser("registered")
 def _parse_registered(d: dict[str, Any]) -> Registered:
-    return Registered(handle=d["handle"])
+    return Registered(handle=d["handle"], request_id=_request_id(d))
 
 
 @_register_parser("opened")
@@ -369,17 +388,18 @@ def _parse_opened(d: dict[str, Any]) -> Opened:
         session=d["session"],
         message_id=d["message_id"],
         trace_id=d.get("trace_id", ""),
+        request_id=_request_id(d),
     )
 
 
 @_register_parser("sent")
 def _parse_sent(d: dict[str, Any]) -> Sent:
-    return Sent(message_id=d["message_id"])
+    return Sent(message_id=d["message_id"], request_id=_request_id(d))
 
 
 @_register_parser("resolved")
 def _parse_resolved(d: dict[str, Any]) -> Resolved:
-    return Resolved(message_id=d["message_id"])
+    return Resolved(message_id=d["message_id"], request_id=_request_id(d))
 
 
 @_register_parser("message")
@@ -404,34 +424,34 @@ def _parse_room_event(d: dict[str, Any]) -> RoomEvent:
 
 @_register_parser("room_created")
 def _parse_room_created(d: dict[str, Any]) -> RoomCreated:
-    return RoomCreated(room_id=d["room_id"])
+    return RoomCreated(room_id=d["room_id"], request_id=_request_id(d))
 
 
 @_register_parser("room_posted")
 def _parse_room_posted(d: dict[str, Any]) -> RoomPosted:
-    return RoomPosted(event_id=d["event_id"], room_seq=d.get("room_seq", 0))
+    return RoomPosted(event_id=d["event_id"], room_seq=d.get("room_seq", 0), request_id=_request_id(d))
 
 
 @_register_parser("room_joined")
 @_register_parser("room_left")
 @_register_parser("room_closed")
 def _parse_room_op(d: dict[str, Any]) -> RoomOpResult:
-    return RoomOpResult(ok=d.get("ok", False))
+    return RoomOpResult(ok=d.get("ok", False), request_id=_request_id(d))
 
 
 @_register_parser("rooms")
 def _parse_rooms(d: dict[str, Any]) -> RoomList:
-    return RoomList(rooms=tuple(_room_info_from_dict(room) for room in d.get("rooms", [])))
+    return RoomList(rooms=tuple(_room_info_from_dict(room) for room in d.get("rooms", [])), request_id=_request_id(d))
 
 
 @_register_parser("room_members")
 def _parse_room_members(d: dict[str, Any]) -> RoomMembers:
-    return RoomMembers(members=tuple(d.get("members", [])))
+    return RoomMembers(members=tuple(d.get("members", [])), request_id=_request_id(d))
 
 
 @_register_parser("room_replay")
 def _parse_room_replay(d: dict[str, Any]) -> RoomReplay:
-    return RoomReplay(events=tuple(_room_event_from_dict(evt) for evt in d.get("events", [])))
+    return RoomReplay(events=tuple(_room_event_from_dict(evt) for evt in d.get("events", [])), request_id=_request_id(d))
 
 
 @_register_parser("introspected")
@@ -440,6 +460,7 @@ def _parse_introspected(d: dict[str, Any]) -> Introspected:
         handle=d["handle"],
         found=d.get("found", False),
         manifest=Manifest.from_dict(d.get("manifest")),
+        request_id=_request_id(d),
     )
 
 
@@ -452,7 +473,7 @@ def _parse_handles(d: dict[str, Any]) -> HandleList:
         )
         for e in d.get("entries", [])
     )
-    return HandleList(entries=entries)
+    return HandleList(entries=entries, request_id=_request_id(d))
 
 
 @_register_parser("handle_matches")
@@ -466,7 +487,7 @@ def _parse_handle_matches(d: dict[str, Any]) -> HandleMatches:
         )
         for e in d.get("matches", [])
     )
-    return HandleMatches(matches=matches)
+    return HandleMatches(matches=matches, request_id=_request_id(d))
 
 
 @_register_parser("sessions")
@@ -480,12 +501,12 @@ def _parse_sessions(d: dict[str, Any]) -> SessionList:
         )
         for s in d.get("sessions", [])
     )
-    return SessionList(sessions=sessions)
+    return SessionList(sessions=sessions, request_id=_request_id(d))
 
 
 @_register_parser("error")
 def _parse_error(d: dict[str, Any]) -> Error:
-    return Error(error=d["error"], request_type=d.get("request_type", "unknown"))
+    return Error(error=d["error"], request_type=d.get("request_type", "unknown"), request_id=_request_id(d))
 
 
 def parse_response(line: str) -> Response:

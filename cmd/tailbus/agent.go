@@ -34,6 +34,7 @@ type manifestCmd struct {
 
 type inboundCmd struct {
 	Type         string       `json:"type"`
+	RequestID    string       `json:"request_id,omitempty"`
 	Handle       string       `json:"handle,omitempty"`
 	Description  string       `json:"description,omitempty"` // deprecated, use manifest
 	Manifest     *manifestCmd `json:"manifest,omitempty"`
@@ -57,12 +58,14 @@ type inboundCmd struct {
 // Outbound response types (stdout)
 
 type registeredResp struct {
-	Type   string `json:"type"`
-	Handle string `json:"handle"`
+	Type      string `json:"type"`
+	RequestID string `json:"request_id,omitempty"`
+	Handle    string `json:"handle"`
 }
 
 type openedResp struct {
 	Type      string `json:"type"`
+	RequestID string `json:"request_id,omitempty"`
 	Session   string `json:"session"`
 	MessageID string `json:"message_id"`
 	TraceID   string `json:"trace_id"`
@@ -70,11 +73,13 @@ type openedResp struct {
 
 type sentResp struct {
 	Type      string `json:"type"`
+	RequestID string `json:"request_id,omitempty"`
 	MessageID string `json:"message_id"`
 }
 
 type resolvedResp struct {
 	Type      string `json:"type"`
+	RequestID string `json:"request_id,omitempty"`
 	MessageID string `json:"message_id"`
 }
 
@@ -90,10 +95,11 @@ type introspectManifestResp struct {
 }
 
 type introspectedResp struct {
-	Type     string                  `json:"type"`
-	Handle   string                  `json:"handle"`
-	Found    bool                    `json:"found"`
-	Manifest *introspectManifestResp `json:"manifest,omitempty"`
+	Type      string                  `json:"type"`
+	RequestID string                  `json:"request_id,omitempty"`
+	Handle    string                  `json:"handle"`
+	Found     bool                    `json:"found"`
+	Manifest  *introspectManifestResp `json:"manifest,omitempty"`
 }
 
 type listEntry struct {
@@ -102,8 +108,9 @@ type listEntry struct {
 }
 
 type listResp struct {
-	Type    string      `json:"type"`
-	Entries []listEntry `json:"entries"`
+	Type      string      `json:"type"`
+	RequestID string      `json:"request_id,omitempty"`
+	Entries   []listEntry `json:"entries"`
 }
 
 type matchEntry struct {
@@ -114,8 +121,9 @@ type matchEntry struct {
 }
 
 type matchesResp struct {
-	Type    string       `json:"type"`
-	Matches []matchEntry `json:"matches"`
+	Type      string       `json:"type"`
+	RequestID string       `json:"request_id,omitempty"`
+	Matches   []matchEntry `json:"matches"`
 }
 
 type messageResp struct {
@@ -147,19 +155,22 @@ type roomEventResp struct {
 }
 
 type roomCreatedResp struct {
-	Type   string `json:"type"`
-	RoomID string `json:"room_id"`
+	Type      string `json:"type"`
+	RequestID string `json:"request_id,omitempty"`
+	RoomID    string `json:"room_id"`
 }
 
 type roomPostedResp struct {
-	Type    string `json:"type"`
-	EventID string `json:"event_id"`
-	RoomSeq uint64 `json:"room_seq"`
+	Type      string `json:"type"`
+	RequestID string `json:"request_id,omitempty"`
+	EventID   string `json:"event_id"`
+	RoomSeq   uint64 `json:"room_seq"`
 }
 
 type roomOpResp struct {
-	Type string `json:"type"`
-	Ok   bool   `json:"ok"`
+	Type      string `json:"type"`
+	RequestID string `json:"request_id,omitempty"`
+	Ok        bool   `json:"ok"`
 }
 
 type roomInfoResp struct {
@@ -175,18 +186,21 @@ type roomInfoResp struct {
 }
 
 type roomsResp struct {
-	Type  string         `json:"type"`
-	Rooms []roomInfoResp `json:"rooms"`
+	Type      string         `json:"type"`
+	RequestID string         `json:"request_id,omitempty"`
+	Rooms     []roomInfoResp `json:"rooms"`
 }
 
 type roomMembersResp struct {
-	Type    string   `json:"type"`
-	Members []string `json:"members"`
+	Type      string   `json:"type"`
+	RequestID string   `json:"request_id,omitempty"`
+	Members   []string `json:"members"`
 }
 
 type roomReplayResp struct {
-	Type   string          `json:"type"`
-	Events []roomEventResp `json:"events"`
+	Type      string          `json:"type"`
+	RequestID string          `json:"request_id,omitempty"`
+	Events    []roomEventResp `json:"events"`
 }
 
 type sessionItem struct {
@@ -197,12 +211,14 @@ type sessionItem struct {
 }
 
 type sessionsResp struct {
-	Type     string        `json:"type"`
-	Sessions []sessionItem `json:"sessions"`
+	Type      string        `json:"type"`
+	RequestID string        `json:"request_id,omitempty"`
+	Sessions  []sessionItem `json:"sessions"`
 }
 
 type errorResp struct {
 	Type        string `json:"type"`
+	RequestID   string `json:"request_id,omitempty"`
 	Error       string `json:"error"`
 	RequestType string `json:"request_type"`
 }
@@ -350,11 +366,11 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 			switch cmd.Type {
 			case "register":
 				if handle != "" {
-					w.Write(errorResp{Type: "error", Error: "already registered as " + handle, RequestType: "register"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "already registered as " + handle, RequestType: "register"})
 					continue
 				}
 				if cmd.Handle == "" {
-					w.Write(errorResp{Type: "error", Error: "handle is required", RequestType: "register"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "handle is required", RequestType: "register"})
 					continue
 				}
 				// Build register request: prefer manifest, fall back to description
@@ -382,21 +398,21 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 				}
 				resp, err := client.Register(ctx, req)
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "register"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "register"})
 					continue
 				}
 				if !resp.Ok {
-					w.Write(errorResp{Type: "error", Error: resp.Error, RequestType: "register"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: resp.Error, RequestType: "register"})
 					continue
 				}
 				handle = cmd.Handle
-				w.Write(registeredResp{Type: "registered", Handle: handle})
+				w.Write(registeredResp{Type: "registered", RequestID: cmd.RequestID, Handle: handle})
 
 				// Launch subscribe goroutine.
 				stream, err := client.Subscribe(ctx, &agentpb.SubscribeRequest{Handle: handle})
 				if err != nil {
 					logger.Error("subscribe failed", "error", err)
-					w.Write(errorResp{Type: "error", Error: "subscribe failed: " + err.Error(), RequestType: "register"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "subscribe failed: " + err.Error(), RequestType: "register"})
 					continue
 				}
 				go func() {
@@ -430,11 +446,11 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 
 			case "open":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "open"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "open"})
 					continue
 				}
 				if cmd.To == "" {
-					w.Write(errorResp{Type: "error", Error: "to is required", RequestType: "open"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "to is required", RequestType: "open"})
 					continue
 				}
 				ct := cmd.ContentType
@@ -449,18 +465,18 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					TraceId:     cmd.TraceID,
 				})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "open"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "open"})
 					continue
 				}
-				w.Write(openedResp{Type: "opened", Session: resp.SessionId, MessageID: resp.MessageId, TraceID: resp.TraceId})
+				w.Write(openedResp{Type: "opened", RequestID: cmd.RequestID, Session: resp.SessionId, MessageID: resp.MessageId, TraceID: resp.TraceId})
 
 			case "send":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "send"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "send"})
 					continue
 				}
 				if cmd.Session == "" {
-					w.Write(errorResp{Type: "error", Error: "session is required", RequestType: "send"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "session is required", RequestType: "send"})
 					continue
 				}
 				ct := cmd.ContentType
@@ -474,18 +490,18 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					ContentType: ct,
 				})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "send"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "send"})
 					continue
 				}
-				w.Write(sentResp{Type: "sent", MessageID: resp.MessageId})
+				w.Write(sentResp{Type: "sent", RequestID: cmd.RequestID, MessageID: resp.MessageId})
 
 			case "resolve":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "resolve"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "resolve"})
 					continue
 				}
 				if cmd.Session == "" {
-					w.Write(errorResp{Type: "error", Error: "session is required", RequestType: "resolve"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "session is required", RequestType: "resolve"})
 					continue
 				}
 				ct := cmd.ContentType
@@ -499,19 +515,19 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					ContentType: ct,
 				})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "resolve"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "resolve"})
 					continue
 				}
-				w.Write(resolvedResp{Type: "resolved", MessageID: resp.MessageId})
+				w.Write(resolvedResp{Type: "resolved", RequestID: cmd.RequestID, MessageID: resp.MessageId})
 
 			case "sessions":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "sessions"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "sessions"})
 					continue
 				}
 				resp, err := client.ListSessions(ctx, &agentpb.ListSessionsRequest{Handle: handle})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "sessions"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "sessions"})
 					continue
 				}
 				items := make([]sessionItem, 0, len(resp.Sessions))
@@ -523,11 +539,11 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 						State:   s.State,
 					})
 				}
-				w.Write(sessionsResp{Type: "sessions", Sessions: items})
+				w.Write(sessionsResp{Type: "sessions", RequestID: cmd.RequestID, Sessions: items})
 
 			case "create_room":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "create_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "create_room"})
 					continue
 				}
 				resp, err := client.CreateRoom(ctx, &agentpb.CreateRoomRequest{
@@ -536,38 +552,38 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					InitialMembers: cmd.Members,
 				})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "create_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "create_room"})
 					continue
 				}
-				w.Write(roomCreatedResp{Type: "room_created", RoomID: resp.RoomId})
+				w.Write(roomCreatedResp{Type: "room_created", RequestID: cmd.RequestID, RoomID: resp.RoomId})
 
 			case "join_room":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "join_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "join_room"})
 					continue
 				}
 				resp, err := client.JoinRoom(ctx, &agentpb.JoinRoomRequest{RoomId: cmd.RoomID, Handle: handle})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "join_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "join_room"})
 					continue
 				}
-				w.Write(roomOpResp{Type: "room_joined", Ok: resp.Ok})
+				w.Write(roomOpResp{Type: "room_joined", RequestID: cmd.RequestID, Ok: resp.Ok})
 
 			case "leave_room":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "leave_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "leave_room"})
 					continue
 				}
 				resp, err := client.LeaveRoom(ctx, &agentpb.LeaveRoomRequest{RoomId: cmd.RoomID, Handle: handle})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "leave_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "leave_room"})
 					continue
 				}
-				w.Write(roomOpResp{Type: "room_left", Ok: resp.Ok})
+				w.Write(roomOpResp{Type: "room_left", RequestID: cmd.RequestID, Ok: resp.Ok})
 
 			case "post_room":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "post_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "post_room"})
 					continue
 				}
 				ct := cmd.ContentType
@@ -582,88 +598,89 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					TraceId:     cmd.TraceID,
 				})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "post_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "post_room"})
 					continue
 				}
-				w.Write(roomPostedResp{Type: "room_posted", EventID: resp.EventId, RoomSeq: resp.RoomSeq})
+				w.Write(roomPostedResp{Type: "room_posted", RequestID: cmd.RequestID, EventID: resp.EventId, RoomSeq: resp.RoomSeq})
 
 			case "list_rooms":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "list_rooms"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "list_rooms"})
 					continue
 				}
 				resp, err := client.ListRooms(ctx, &agentpb.ListRoomsRequest{Handle: handle})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "list_rooms"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "list_rooms"})
 					continue
 				}
 				rooms := make([]roomInfoResp, 0, len(resp.Rooms))
 				for _, room := range resp.Rooms {
 					rooms = append(rooms, protoRoomInfoToResp(room))
 				}
-				w.Write(roomsResp{Type: "rooms", Rooms: rooms})
+				w.Write(roomsResp{Type: "rooms", RequestID: cmd.RequestID, Rooms: rooms})
 
 			case "room_members":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "room_members"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "room_members"})
 					continue
 				}
 				resp, err := client.ListRoomMembers(ctx, &agentpb.ListRoomMembersRequest{RoomId: cmd.RoomID, Handle: handle})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "room_members"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "room_members"})
 					continue
 				}
-				w.Write(roomMembersResp{Type: "room_members", Members: resp.Members})
+				w.Write(roomMembersResp{Type: "room_members", RequestID: cmd.RequestID, Members: resp.Members})
 
 			case "replay_room":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "replay_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "replay_room"})
 					continue
 				}
 				resp, err := client.ReplayRoom(ctx, &agentpb.ReplayRoomRequest{RoomId: cmd.RoomID, Handle: handle, SinceSeq: cmd.SinceSeq})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "replay_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "replay_room"})
 					continue
 				}
 				events := make([]roomEventResp, 0, len(resp.Events))
 				for _, event := range resp.Events {
 					events = append(events, protoRoomEventToResp(event))
 				}
-				w.Write(roomReplayResp{Type: "room_replay", Events: events})
+				w.Write(roomReplayResp{Type: "room_replay", RequestID: cmd.RequestID, Events: events})
 
 			case "close_room":
 				if handle == "" {
-					w.Write(errorResp{Type: "error", Error: "must register first", RequestType: "close_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "close_room"})
 					continue
 				}
 				resp, err := client.CloseRoom(ctx, &agentpb.CloseRoomRequest{RoomId: cmd.RoomID, Handle: handle})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "close_room"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "close_room"})
 					continue
 				}
-				w.Write(roomOpResp{Type: "room_closed", Ok: resp.Ok})
+				w.Write(roomOpResp{Type: "room_closed", RequestID: cmd.RequestID, Ok: resp.Ok})
 
 			case "introspect":
 				if cmd.Handle == "" {
-					w.Write(errorResp{Type: "error", Error: "handle is required", RequestType: "introspect"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "handle is required", RequestType: "introspect"})
 					continue
 				}
 				resp, err := client.IntrospectHandle(ctx, &agentpb.IntrospectHandleRequest{Handle: cmd.Handle})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "introspect"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "introspect"})
 					continue
 				}
 				w.Write(introspectedResp{
-					Type:     "introspected",
-					Handle:   resp.Handle,
-					Found:    resp.Found,
-					Manifest: protoManifestToResp(resp.Manifest),
+					Type:      "introspected",
+					RequestID: cmd.RequestID,
+					Handle:    resp.Handle,
+					Found:     resp.Found,
+					Manifest:  protoManifestToResp(resp.Manifest),
 				})
 
 			case "list":
 				resp, err := client.ListHandles(ctx, &agentpb.ListHandlesRequest{Tags: cmd.Tags})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "list"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "list"})
 					continue
 				}
 				entries := make([]listEntry, 0, len(resp.Entries))
@@ -673,7 +690,7 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 						Manifest: protoManifestToResp(e.Manifest),
 					})
 				}
-				w.Write(listResp{Type: "handles", Entries: entries})
+				w.Write(listResp{Type: "handles", RequestID: cmd.RequestID, Entries: entries})
 
 			case "find":
 				resp, err := client.FindHandles(ctx, &agentpb.FindHandlesRequest{
@@ -685,7 +702,7 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 					Limit:        cmd.Limit,
 				})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "find"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "find"})
 					continue
 				}
 				matches := make([]matchEntry, 0, len(resp.Matches))
@@ -697,28 +714,29 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 						MatchReasons: match.MatchReasons,
 					})
 				}
-				w.Write(matchesResp{Type: "handle_matches", Matches: matches})
+				w.Write(matchesResp{Type: "handle_matches", RequestID: cmd.RequestID, Matches: matches})
 
 			// Keep backward compat: "describe" maps to "introspect"
 			case "describe":
 				if cmd.Handle == "" {
-					w.Write(errorResp{Type: "error", Error: "handle is required", RequestType: "describe"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "handle is required", RequestType: "describe"})
 					continue
 				}
 				resp, err := client.IntrospectHandle(ctx, &agentpb.IntrospectHandleRequest{Handle: cmd.Handle})
 				if err != nil {
-					w.Write(errorResp{Type: "error", Error: err.Error(), RequestType: "describe"})
+					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "describe"})
 					continue
 				}
 				w.Write(introspectedResp{
-					Type:     "introspected",
-					Handle:   resp.Handle,
-					Found:    resp.Found,
-					Manifest: protoManifestToResp(resp.Manifest),
+					Type:      "introspected",
+					RequestID: cmd.RequestID,
+					Handle:    resp.Handle,
+					Found:     resp.Found,
+					Manifest:  protoManifestToResp(resp.Manifest),
 				})
 
 			default:
-				w.Write(errorResp{Type: "error", Error: "unknown command type: " + cmd.Type, RequestType: cmd.Type})
+				w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "unknown command type: " + cmd.Type, RequestType: cmd.Type})
 			}
 
 		case <-ctx.Done():
