@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,6 +14,7 @@ import (
 
 	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
+	"google.golang.org/grpc"
 )
 
 // roomOpTimeout is the per-operation timeout for room commands in the bridge,
@@ -229,14 +232,34 @@ type errorResp struct {
 	RequestType string `json:"request_type"`
 }
 
+type bridgeClient interface {
+	Register(ctx context.Context, in *agentpb.RegisterRequest, opts ...grpc.CallOption) (*agentpb.RegisterResponse, error)
+	IntrospectHandle(ctx context.Context, in *agentpb.IntrospectHandleRequest, opts ...grpc.CallOption) (*agentpb.IntrospectHandleResponse, error)
+	ListHandles(ctx context.Context, in *agentpb.ListHandlesRequest, opts ...grpc.CallOption) (*agentpb.ListHandlesResponse, error)
+	FindHandles(ctx context.Context, in *agentpb.FindHandlesRequest, opts ...grpc.CallOption) (*agentpb.FindHandlesResponse, error)
+	OpenSession(ctx context.Context, in *agentpb.OpenSessionRequest, opts ...grpc.CallOption) (*agentpb.OpenSessionResponse, error)
+	SendMessage(ctx context.Context, in *agentpb.SendMessageRequest, opts ...grpc.CallOption) (*agentpb.SendMessageResponse, error)
+	Subscribe(ctx context.Context, in *agentpb.SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[agentpb.IncomingMessage], error)
+	ResolveSession(ctx context.Context, in *agentpb.ResolveSessionRequest, opts ...grpc.CallOption) (*agentpb.ResolveSessionResponse, error)
+	CreateRoom(ctx context.Context, in *agentpb.CreateRoomRequest, opts ...grpc.CallOption) (*agentpb.CreateRoomResponse, error)
+	JoinRoom(ctx context.Context, in *agentpb.JoinRoomRequest, opts ...grpc.CallOption) (*agentpb.JoinRoomResponse, error)
+	LeaveRoom(ctx context.Context, in *agentpb.LeaveRoomRequest, opts ...grpc.CallOption) (*agentpb.LeaveRoomResponse, error)
+	PostRoomMessage(ctx context.Context, in *agentpb.PostRoomMessageRequest, opts ...grpc.CallOption) (*agentpb.PostRoomMessageResponse, error)
+	ListRooms(ctx context.Context, in *agentpb.ListRoomsRequest, opts ...grpc.CallOption) (*agentpb.ListRoomsResponse, error)
+	ListRoomMembers(ctx context.Context, in *agentpb.ListRoomMembersRequest, opts ...grpc.CallOption) (*agentpb.ListRoomMembersResponse, error)
+	ReplayRoom(ctx context.Context, in *agentpb.ReplayRoomRequest, opts ...grpc.CallOption) (*agentpb.ReplayRoomResponse, error)
+	CloseRoom(ctx context.Context, in *agentpb.CloseRoomRequest, opts ...grpc.CallOption) (*agentpb.CloseRoomResponse, error)
+	ListSessions(ctx context.Context, in *agentpb.ListSessionsRequest, opts ...grpc.CallOption) (*agentpb.ListSessionsResponse, error)
+}
+
 // jsonWriter provides mutex-protected JSON line output to stdout.
 type jsonWriter struct {
 	mu  sync.Mutex
 	enc *json.Encoder
 }
 
-func newJSONWriter() *jsonWriter {
-	return &jsonWriter{enc: json.NewEncoder(os.Stdout)}
+func newJSONWriter(out io.Writer) *jsonWriter {
+	return &jsonWriter{enc: json.NewEncoder(out)}
 }
 
 func (w *jsonWriter) Write(v any) {
@@ -329,18 +352,396 @@ func protoRoomInfoToResp(room *messagepb.RoomInfo) roomInfoResp {
 	}
 }
 
-func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
+func buildRegisterRequest(cmd inboundCmd) *agentpb.RegisterRequest {
+	req := &agentpb.RegisterRequest{Handle: cmd.Handle}
+	if cmd.Manifest != nil {
+		m := &messagepb.ServiceManifest{
+			Description:  cmd.Manifest.Description,
+			Tags:         cmd.Manifest.Tags,
+			Version:      cmd.Manifest.Version,
+			Capabilities: cmd.Manifest.Capabilities,
+			Domains:      cmd.Manifest.Domains,
+			InputTypes:   cmd.Manifest.InputTypes,
+			OutputTypes:  cmd.Manifest.OutputTypes,
+		}
+		for _, c := range cmd.Manifest.Commands {
+			m.Commands = append(m.Commands, &messagepb.CommandSpec{
+				Name:             c.Name,
+				Description:      c.Description,
+				ParametersSchema: c.ParametersSchema,
+			})
+		}
+		req.Manifest = m
+	} else if cmd.Description != "" {
+		req.Description = cmd.Description
+	}
+	return req
+}
 
-	w := newJSONWriter()
+func startBridgeSubscription(ctx context.Context, client bridgeClient, logger *slog.Logger, w *jsonWriter, handle string) error {
+	stream, err := client.Subscribe(ctx, &agentpb.SubscribeRequest{Handle: handle})
+	if err != nil {
+		return err
+	}
+	go func() {
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				if ctx.Err() != nil || err == io.EOF {
+					return
+				}
+				logger.Error("subscribe stream error", "error", err)
+				return
+			}
+			if env := msg.Envelope; env != nil {
+				w.Write(messageResp{
+					Type:        "message",
+					Session:     env.SessionId,
+					From:        env.FromHandle,
+					To:          env.ToHandle,
+					Payload:     string(env.Payload),
+					ContentType: env.ContentType,
+					MessageType: envelopeTypeString(env.Type),
+					TraceID:     env.TraceId,
+					MessageID:   env.MessageId,
+					SentAt:      env.SentAtUnix,
+				})
+			} else if event := msg.RoomEvent; event != nil {
+				w.Write(protoRoomEventToResp(event))
+			}
+		}
+	}()
+	return nil
+}
+
+func executeBridgeCommand(ctx context.Context, client bridgeClient, logger *slog.Logger, w *jsonWriter, handle *string, cmd inboundCmd, fatal bool) error {
+	fail := func(requestType, message string, err error) error {
+		w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: message, RequestType: requestType})
+		if fatal {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("%s", message)
+		}
+		return nil
+	}
+
+	switch cmd.Type {
+	case "register":
+		if *handle != "" {
+			return fail("register", "already registered as "+*handle, nil)
+		}
+		if cmd.Handle == "" {
+			return fail("register", "handle is required", nil)
+		}
+		resp, err := client.Register(ctx, buildRegisterRequest(cmd))
+		if err != nil {
+			return fail("register", err.Error(), err)
+		}
+		if !resp.Ok {
+			return fail("register", resp.Error, nil)
+		}
+		if err := startBridgeSubscription(ctx, client, logger, w, cmd.Handle); err != nil {
+			logger.Error("subscribe failed", "error", err)
+			return fail("register", "subscribe failed: "+err.Error(), err)
+		}
+		*handle = cmd.Handle
+		w.Write(registeredResp{Type: "registered", RequestID: cmd.RequestID, Handle: *handle})
+		return nil
+
+	case "open":
+		if *handle == "" {
+			return fail("open", "must register first", nil)
+		}
+		if cmd.To == "" {
+			return fail("open", "to is required", nil)
+		}
+		ct := cmd.ContentType
+		if ct == "" {
+			ct = "text/plain"
+		}
+		resp, err := client.OpenSession(ctx, &agentpb.OpenSessionRequest{
+			FromHandle:  *handle,
+			ToHandle:    cmd.To,
+			Payload:     []byte(cmd.Payload),
+			ContentType: ct,
+			TraceId:     cmd.TraceID,
+		})
+		if err != nil {
+			return fail("open", err.Error(), err)
+		}
+		w.Write(openedResp{Type: "opened", RequestID: cmd.RequestID, Session: resp.SessionId, MessageID: resp.MessageId, TraceID: resp.TraceId})
+		return nil
+
+	case "send":
+		if *handle == "" {
+			return fail("send", "must register first", nil)
+		}
+		if cmd.Session == "" {
+			return fail("send", "session is required", nil)
+		}
+		ct := cmd.ContentType
+		if ct == "" {
+			ct = "text/plain"
+		}
+		resp, err := client.SendMessage(ctx, &agentpb.SendMessageRequest{
+			SessionId:   cmd.Session,
+			FromHandle:  *handle,
+			Payload:     []byte(cmd.Payload),
+			ContentType: ct,
+		})
+		if err != nil {
+			return fail("send", err.Error(), err)
+		}
+		w.Write(sentResp{Type: "sent", RequestID: cmd.RequestID, MessageID: resp.MessageId})
+		return nil
+
+	case "resolve":
+		if *handle == "" {
+			return fail("resolve", "must register first", nil)
+		}
+		if cmd.Session == "" {
+			return fail("resolve", "session is required", nil)
+		}
+		ct := cmd.ContentType
+		if ct == "" {
+			ct = "text/plain"
+		}
+		resp, err := client.ResolveSession(ctx, &agentpb.ResolveSessionRequest{
+			SessionId:   cmd.Session,
+			FromHandle:  *handle,
+			Payload:     []byte(cmd.Payload),
+			ContentType: ct,
+		})
+		if err != nil {
+			return fail("resolve", err.Error(), err)
+		}
+		w.Write(resolvedResp{Type: "resolved", RequestID: cmd.RequestID, MessageID: resp.MessageId})
+		return nil
+
+	case "sessions":
+		if *handle == "" {
+			return fail("sessions", "must register first", nil)
+		}
+		resp, err := client.ListSessions(ctx, &agentpb.ListSessionsRequest{Handle: *handle})
+		if err != nil {
+			return fail("sessions", err.Error(), err)
+		}
+		items := make([]sessionItem, 0, len(resp.Sessions))
+		for _, s := range resp.Sessions {
+			items = append(items, sessionItem{
+				Session: s.SessionId,
+				From:    s.FromHandle,
+				To:      s.ToHandle,
+				State:   s.State,
+			})
+		}
+		w.Write(sessionsResp{Type: "sessions", RequestID: cmd.RequestID, Sessions: items})
+		return nil
+
+	case "create_room":
+		if *handle == "" {
+			return fail("create_room", "must register first", nil)
+		}
+		opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+		resp, err := client.CreateRoom(opCtx, &agentpb.CreateRoomRequest{
+			CreatorHandle:  *handle,
+			Title:          cmd.Title,
+			InitialMembers: cmd.Members,
+		})
+		opCancel()
+		if err != nil {
+			return fail("create_room", err.Error(), err)
+		}
+		w.Write(roomCreatedResp{Type: "room_created", RequestID: cmd.RequestID, RoomID: resp.RoomId})
+		return nil
+
+	case "join_room":
+		if *handle == "" {
+			return fail("join_room", "must register first", nil)
+		}
+		opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+		resp, err := client.JoinRoom(opCtx, &agentpb.JoinRoomRequest{RoomId: cmd.RoomID, Handle: *handle})
+		opCancel()
+		if err != nil {
+			return fail("join_room", err.Error(), err)
+		}
+		w.Write(roomOpResp{Type: "room_joined", RequestID: cmd.RequestID, Ok: resp.Ok})
+		return nil
+
+	case "leave_room":
+		if *handle == "" {
+			return fail("leave_room", "must register first", nil)
+		}
+		opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+		resp, err := client.LeaveRoom(opCtx, &agentpb.LeaveRoomRequest{RoomId: cmd.RoomID, Handle: *handle})
+		opCancel()
+		if err != nil {
+			return fail("leave_room", err.Error(), err)
+		}
+		w.Write(roomOpResp{Type: "room_left", RequestID: cmd.RequestID, Ok: resp.Ok})
+		return nil
+
+	case "post_room":
+		if *handle == "" {
+			return fail("post_room", "must register first", nil)
+		}
+		ct := cmd.ContentType
+		if ct == "" {
+			ct = "text/plain"
+		}
+		opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+		resp, err := client.PostRoomMessage(opCtx, &agentpb.PostRoomMessageRequest{
+			RoomId:      cmd.RoomID,
+			FromHandle:  *handle,
+			Payload:     []byte(cmd.Payload),
+			ContentType: ct,
+			TraceId:     cmd.TraceID,
+		})
+		opCancel()
+		if err != nil {
+			return fail("post_room", err.Error(), err)
+		}
+		w.Write(roomPostedResp{Type: "room_posted", RequestID: cmd.RequestID, EventID: resp.EventId, RoomSeq: resp.RoomSeq})
+		return nil
+
+	case "list_rooms":
+		if *handle == "" {
+			return fail("list_rooms", "must register first", nil)
+		}
+		opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+		resp, err := client.ListRooms(opCtx, &agentpb.ListRoomsRequest{Handle: *handle})
+		opCancel()
+		if err != nil {
+			return fail("list_rooms", err.Error(), err)
+		}
+		rooms := make([]roomInfoResp, 0, len(resp.Rooms))
+		for _, room := range resp.Rooms {
+			rooms = append(rooms, protoRoomInfoToResp(room))
+		}
+		w.Write(roomsResp{Type: "rooms", RequestID: cmd.RequestID, Rooms: rooms})
+		return nil
+
+	case "room_members":
+		if *handle == "" {
+			return fail("room_members", "must register first", nil)
+		}
+		opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+		resp, err := client.ListRoomMembers(opCtx, &agentpb.ListRoomMembersRequest{RoomId: cmd.RoomID, Handle: *handle})
+		opCancel()
+		if err != nil {
+			return fail("room_members", err.Error(), err)
+		}
+		w.Write(roomMembersResp{Type: "room_members", RequestID: cmd.RequestID, Members: resp.Members})
+		return nil
+
+	case "replay_room":
+		if *handle == "" {
+			return fail("replay_room", "must register first", nil)
+		}
+		opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+		resp, err := client.ReplayRoom(opCtx, &agentpb.ReplayRoomRequest{RoomId: cmd.RoomID, Handle: *handle, SinceSeq: cmd.SinceSeq})
+		opCancel()
+		if err != nil {
+			return fail("replay_room", err.Error(), err)
+		}
+		events := make([]roomEventResp, 0, len(resp.Events))
+		for _, event := range resp.Events {
+			events = append(events, protoRoomEventToResp(event))
+		}
+		w.Write(roomReplayResp{Type: "room_replay", RequestID: cmd.RequestID, Events: events})
+		return nil
+
+	case "close_room":
+		if *handle == "" {
+			return fail("close_room", "must register first", nil)
+		}
+		opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
+		resp, err := client.CloseRoom(opCtx, &agentpb.CloseRoomRequest{RoomId: cmd.RoomID, Handle: *handle})
+		opCancel()
+		if err != nil {
+			return fail("close_room", err.Error(), err)
+		}
+		w.Write(roomOpResp{Type: "room_closed", RequestID: cmd.RequestID, Ok: resp.Ok})
+		return nil
+
+	case "introspect", "describe":
+		if cmd.Handle == "" {
+			return fail(cmd.Type, "handle is required", nil)
+		}
+		resp, err := client.IntrospectHandle(ctx, &agentpb.IntrospectHandleRequest{Handle: cmd.Handle})
+		if err != nil {
+			return fail(cmd.Type, err.Error(), err)
+		}
+		w.Write(introspectedResp{
+			Type:      "introspected",
+			RequestID: cmd.RequestID,
+			Handle:    resp.Handle,
+			Found:     resp.Found,
+			Manifest:  protoManifestToResp(resp.Manifest),
+		})
+		return nil
+
+	case "list":
+		resp, err := client.ListHandles(ctx, &agentpb.ListHandlesRequest{Tags: cmd.Tags})
+		if err != nil {
+			return fail("list", err.Error(), err)
+		}
+		entries := make([]listEntry, 0, len(resp.Entries))
+		for _, e := range resp.Entries {
+			entries = append(entries, listEntry{
+				Handle:   e.Handle,
+				Manifest: protoManifestToResp(e.Manifest),
+			})
+		}
+		w.Write(listResp{Type: "handles", RequestID: cmd.RequestID, Entries: entries})
+		return nil
+
+	case "find":
+		resp, err := client.FindHandles(ctx, &agentpb.FindHandlesRequest{
+			Capabilities: cmd.Capabilities,
+			Domains:      cmd.Domains,
+			Tags:         cmd.Tags,
+			CommandName:  cmd.CommandName,
+			Version:      cmd.Version,
+			Limit:        cmd.Limit,
+		})
+		if err != nil {
+			return fail("find", err.Error(), err)
+		}
+		matches := make([]matchEntry, 0, len(resp.Matches))
+		for _, match := range resp.Matches {
+			matches = append(matches, matchEntry{
+				Handle:       match.Handle,
+				Manifest:     protoManifestToResp(match.Manifest),
+				Score:        match.Score,
+				MatchReasons: match.MatchReasons,
+			})
+		}
+		w.Write(matchesResp{Type: "handle_matches", RequestID: cmd.RequestID, Matches: matches})
+		return nil
+
+	default:
+		return fail(cmd.Type, "unknown command type: "+cmd.Type, nil)
+	}
+}
+
+func runBridge(ctx context.Context, client bridgeClient, logger *slog.Logger, input io.Reader, output io.Writer, initial []inboundCmd) error {
+	w := newJSONWriter(output)
 	var handle string
 
-	// Scanner goroutine: reads stdin line-by-line into cmdCh.
+	for _, cmd := range initial {
+		if err := executeBridgeCommand(ctx, client, logger, w, &handle, cmd, true); err != nil {
+			return err
+		}
+	}
+
 	cmdCh := make(chan inboundCmd)
+	scanErrCh := make(chan error, 1)
 	go func() {
 		defer close(cmdCh)
-		scanner := bufio.NewScanner(os.Stdin)
+		scanner := bufio.NewScanner(input)
+		scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 		for scanner.Scan() {
 			line := scanner.Bytes()
 			if len(line) == 0 {
@@ -357,413 +758,31 @@ func runAgent(client agentpb.AgentAPIClient, logger *slog.Logger) error {
 				return
 			}
 		}
+		scanErrCh <- scanner.Err()
 	}()
 
-	// Main dispatch loop.
 	for {
 		select {
 		case cmd, ok := <-cmdCh:
 			if !ok {
-				// stdin closed
+				if err := <-scanErrCh; err != nil {
+					return err
+				}
 				logger.Info("stdin closed, exiting")
 				return nil
 			}
-
-			switch cmd.Type {
-			case "register":
-				if handle != "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "already registered as " + handle, RequestType: "register"})
-					continue
-				}
-				if cmd.Handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "handle is required", RequestType: "register"})
-					continue
-				}
-				// Build register request: prefer manifest, fall back to description
-				req := &agentpb.RegisterRequest{Handle: cmd.Handle}
-				if cmd.Manifest != nil {
-					m := &messagepb.ServiceManifest{
-						Description:  cmd.Manifest.Description,
-						Tags:         cmd.Manifest.Tags,
-						Version:      cmd.Manifest.Version,
-						Capabilities: cmd.Manifest.Capabilities,
-						Domains:      cmd.Manifest.Domains,
-						InputTypes:   cmd.Manifest.InputTypes,
-						OutputTypes:  cmd.Manifest.OutputTypes,
-					}
-					for _, c := range cmd.Manifest.Commands {
-						m.Commands = append(m.Commands, &messagepb.CommandSpec{
-							Name:             c.Name,
-							Description:      c.Description,
-							ParametersSchema: c.ParametersSchema,
-						})
-					}
-					req.Manifest = m
-				} else if cmd.Description != "" {
-					req.Description = cmd.Description
-				}
-				resp, err := client.Register(ctx, req)
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "register"})
-					continue
-				}
-				if !resp.Ok {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: resp.Error, RequestType: "register"})
-					continue
-				}
-				handle = cmd.Handle
-				w.Write(registeredResp{Type: "registered", RequestID: cmd.RequestID, Handle: handle})
-
-				// Launch subscribe goroutine.
-				stream, err := client.Subscribe(ctx, &agentpb.SubscribeRequest{Handle: handle})
-				if err != nil {
-					logger.Error("subscribe failed", "error", err)
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "subscribe failed: " + err.Error(), RequestType: "register"})
-					continue
-				}
-				go func() {
-					for {
-						msg, err := stream.Recv()
-						if err != nil {
-							if ctx.Err() != nil {
-								return
-							}
-							logger.Error("subscribe stream error", "error", err)
-							return
-						}
-						if env := msg.Envelope; env != nil {
-							w.Write(messageResp{
-								Type:        "message",
-								Session:     env.SessionId,
-								From:        env.FromHandle,
-								To:          env.ToHandle,
-								Payload:     string(env.Payload),
-								ContentType: env.ContentType,
-								MessageType: envelopeTypeString(env.Type),
-								TraceID:     env.TraceId,
-								MessageID:   env.MessageId,
-								SentAt:      env.SentAtUnix,
-							})
-						} else if event := msg.RoomEvent; event != nil {
-							w.Write(protoRoomEventToResp(event))
-						}
-					}
-				}()
-
-			case "open":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "open"})
-					continue
-				}
-				if cmd.To == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "to is required", RequestType: "open"})
-					continue
-				}
-				ct := cmd.ContentType
-				if ct == "" {
-					ct = "text/plain"
-				}
-				resp, err := client.OpenSession(ctx, &agentpb.OpenSessionRequest{
-					FromHandle:  handle,
-					ToHandle:    cmd.To,
-					Payload:     []byte(cmd.Payload),
-					ContentType: ct,
-					TraceId:     cmd.TraceID,
-				})
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "open"})
-					continue
-				}
-				w.Write(openedResp{Type: "opened", RequestID: cmd.RequestID, Session: resp.SessionId, MessageID: resp.MessageId, TraceID: resp.TraceId})
-
-			case "send":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "send"})
-					continue
-				}
-				if cmd.Session == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "session is required", RequestType: "send"})
-					continue
-				}
-				ct := cmd.ContentType
-				if ct == "" {
-					ct = "text/plain"
-				}
-				resp, err := client.SendMessage(ctx, &agentpb.SendMessageRequest{
-					SessionId:   cmd.Session,
-					FromHandle:  handle,
-					Payload:     []byte(cmd.Payload),
-					ContentType: ct,
-				})
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "send"})
-					continue
-				}
-				w.Write(sentResp{Type: "sent", RequestID: cmd.RequestID, MessageID: resp.MessageId})
-
-			case "resolve":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "resolve"})
-					continue
-				}
-				if cmd.Session == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "session is required", RequestType: "resolve"})
-					continue
-				}
-				ct := cmd.ContentType
-				if ct == "" {
-					ct = "text/plain"
-				}
-				resp, err := client.ResolveSession(ctx, &agentpb.ResolveSessionRequest{
-					SessionId:   cmd.Session,
-					FromHandle:  handle,
-					Payload:     []byte(cmd.Payload),
-					ContentType: ct,
-				})
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "resolve"})
-					continue
-				}
-				w.Write(resolvedResp{Type: "resolved", RequestID: cmd.RequestID, MessageID: resp.MessageId})
-
-			case "sessions":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "sessions"})
-					continue
-				}
-				resp, err := client.ListSessions(ctx, &agentpb.ListSessionsRequest{Handle: handle})
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "sessions"})
-					continue
-				}
-				items := make([]sessionItem, 0, len(resp.Sessions))
-				for _, s := range resp.Sessions {
-					items = append(items, sessionItem{
-						Session: s.SessionId,
-						From:    s.FromHandle,
-						To:      s.ToHandle,
-						State:   s.State,
-					})
-				}
-				w.Write(sessionsResp{Type: "sessions", RequestID: cmd.RequestID, Sessions: items})
-
-			case "create_room":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "create_room"})
-					continue
-				}
-				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
-				resp, err := client.CreateRoom(opCtx, &agentpb.CreateRoomRequest{
-					CreatorHandle:  handle,
-					Title:          cmd.Title,
-					InitialMembers: cmd.Members,
-				})
-				opCancel()
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "create_room"})
-					continue
-				}
-				w.Write(roomCreatedResp{Type: "room_created", RequestID: cmd.RequestID, RoomID: resp.RoomId})
-
-			case "join_room":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "join_room"})
-					continue
-				}
-				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
-				resp, err := client.JoinRoom(opCtx, &agentpb.JoinRoomRequest{RoomId: cmd.RoomID, Handle: handle})
-				opCancel()
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "join_room"})
-					continue
-				}
-				w.Write(roomOpResp{Type: "room_joined", RequestID: cmd.RequestID, Ok: resp.Ok})
-
-			case "leave_room":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "leave_room"})
-					continue
-				}
-				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
-				resp, err := client.LeaveRoom(opCtx, &agentpb.LeaveRoomRequest{RoomId: cmd.RoomID, Handle: handle})
-				opCancel()
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "leave_room"})
-					continue
-				}
-				w.Write(roomOpResp{Type: "room_left", RequestID: cmd.RequestID, Ok: resp.Ok})
-
-			case "post_room":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "post_room"})
-					continue
-				}
-				ct := cmd.ContentType
-				if ct == "" {
-					ct = "text/plain"
-				}
-				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
-				resp, err := client.PostRoomMessage(opCtx, &agentpb.PostRoomMessageRequest{
-					RoomId:      cmd.RoomID,
-					FromHandle:  handle,
-					Payload:     []byte(cmd.Payload),
-					ContentType: ct,
-					TraceId:     cmd.TraceID,
-				})
-				opCancel()
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "post_room"})
-					continue
-				}
-				w.Write(roomPostedResp{Type: "room_posted", RequestID: cmd.RequestID, EventID: resp.EventId, RoomSeq: resp.RoomSeq})
-
-			case "list_rooms":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "list_rooms"})
-					continue
-				}
-				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
-				resp, err := client.ListRooms(opCtx, &agentpb.ListRoomsRequest{Handle: handle})
-				opCancel()
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "list_rooms"})
-					continue
-				}
-				rooms := make([]roomInfoResp, 0, len(resp.Rooms))
-				for _, room := range resp.Rooms {
-					rooms = append(rooms, protoRoomInfoToResp(room))
-				}
-				w.Write(roomsResp{Type: "rooms", RequestID: cmd.RequestID, Rooms: rooms})
-
-			case "room_members":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "room_members"})
-					continue
-				}
-				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
-				resp, err := client.ListRoomMembers(opCtx, &agentpb.ListRoomMembersRequest{RoomId: cmd.RoomID, Handle: handle})
-				opCancel()
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "room_members"})
-					continue
-				}
-				w.Write(roomMembersResp{Type: "room_members", RequestID: cmd.RequestID, Members: resp.Members})
-
-			case "replay_room":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "replay_room"})
-					continue
-				}
-				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
-				resp, err := client.ReplayRoom(opCtx, &agentpb.ReplayRoomRequest{RoomId: cmd.RoomID, Handle: handle, SinceSeq: cmd.SinceSeq})
-				opCancel()
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "replay_room"})
-					continue
-				}
-				events := make([]roomEventResp, 0, len(resp.Events))
-				for _, event := range resp.Events {
-					events = append(events, protoRoomEventToResp(event))
-				}
-				w.Write(roomReplayResp{Type: "room_replay", RequestID: cmd.RequestID, Events: events})
-
-			case "close_room":
-				if handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "must register first", RequestType: "close_room"})
-					continue
-				}
-				opCtx, opCancel := context.WithTimeout(ctx, roomOpTimeout)
-				resp, err := client.CloseRoom(opCtx, &agentpb.CloseRoomRequest{RoomId: cmd.RoomID, Handle: handle})
-				opCancel()
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "close_room"})
-					continue
-				}
-				w.Write(roomOpResp{Type: "room_closed", RequestID: cmd.RequestID, Ok: resp.Ok})
-
-			case "introspect":
-				if cmd.Handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "handle is required", RequestType: "introspect"})
-					continue
-				}
-				resp, err := client.IntrospectHandle(ctx, &agentpb.IntrospectHandleRequest{Handle: cmd.Handle})
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "introspect"})
-					continue
-				}
-				w.Write(introspectedResp{
-					Type:      "introspected",
-					RequestID: cmd.RequestID,
-					Handle:    resp.Handle,
-					Found:     resp.Found,
-					Manifest:  protoManifestToResp(resp.Manifest),
-				})
-
-			case "list":
-				resp, err := client.ListHandles(ctx, &agentpb.ListHandlesRequest{Tags: cmd.Tags})
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "list"})
-					continue
-				}
-				entries := make([]listEntry, 0, len(resp.Entries))
-				for _, e := range resp.Entries {
-					entries = append(entries, listEntry{
-						Handle:   e.Handle,
-						Manifest: protoManifestToResp(e.Manifest),
-					})
-				}
-				w.Write(listResp{Type: "handles", RequestID: cmd.RequestID, Entries: entries})
-
-			case "find":
-				resp, err := client.FindHandles(ctx, &agentpb.FindHandlesRequest{
-					Capabilities: cmd.Capabilities,
-					Domains:      cmd.Domains,
-					Tags:         cmd.Tags,
-					CommandName:  cmd.CommandName,
-					Version:      cmd.Version,
-					Limit:        cmd.Limit,
-				})
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "find"})
-					continue
-				}
-				matches := make([]matchEntry, 0, len(resp.Matches))
-				for _, match := range resp.Matches {
-					matches = append(matches, matchEntry{
-						Handle:       match.Handle,
-						Manifest:     protoManifestToResp(match.Manifest),
-						Score:        match.Score,
-						MatchReasons: match.MatchReasons,
-					})
-				}
-				w.Write(matchesResp{Type: "handle_matches", RequestID: cmd.RequestID, Matches: matches})
-
-			// Keep backward compat: "describe" maps to "introspect"
-			case "describe":
-				if cmd.Handle == "" {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "handle is required", RequestType: "describe"})
-					continue
-				}
-				resp, err := client.IntrospectHandle(ctx, &agentpb.IntrospectHandleRequest{Handle: cmd.Handle})
-				if err != nil {
-					w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: err.Error(), RequestType: "describe"})
-					continue
-				}
-				w.Write(introspectedResp{
-					Type:      "introspected",
-					RequestID: cmd.RequestID,
-					Handle:    resp.Handle,
-					Found:     resp.Found,
-					Manifest:  protoManifestToResp(resp.Manifest),
-				})
-
-			default:
-				w.Write(errorResp{Type: "error", RequestID: cmd.RequestID, Error: "unknown command type: " + cmd.Type, RequestType: cmd.Type})
+			if err := executeBridgeCommand(ctx, client, logger, w, &handle, cmd, false); err != nil {
+				return err
 			}
-
 		case <-ctx.Done():
 			logger.Info("shutting down")
 			return nil
 		}
 	}
+}
+
+func runAgent(client bridgeClient, logger *slog.Logger) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	return runBridge(ctx, client, logger, os.Stdin, os.Stdout, nil)
 }

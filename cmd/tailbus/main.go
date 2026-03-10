@@ -123,7 +123,7 @@ func main() {
 		fmt.Println("  stop      Stop the running daemon")
 		fmt.Println("\nMesh commands:")
 		fmt.Println("  fire      One-shot: send message, wait for response, print, exit")
-		fmt.Println("  register, introspect, list, find, open, send, subscribe, resolve, sessions, dashboard, trace, agent")
+		fmt.Println("  register, introspect, list, find, open, send, subscribe, resolve, sessions, dashboard, trace, agent, attach")
 		os.Exit(1)
 	}
 
@@ -548,6 +548,12 @@ func main() {
 	case "agent":
 		if err := runAgent(client, logger); err != nil {
 			logger.Error("agent bridge error", "error", err)
+			os.Exit(1)
+		}
+
+	case "attach":
+		if err := runAttach(client, logger, args[1:]); err != nil {
+			logger.Error("attach failed", "error", err)
 			os.Exit(1)
 		}
 
