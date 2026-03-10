@@ -19,6 +19,7 @@ NODES="
 control-node:19743:19311
 implement-node:19744:19312
 review-node:19745:19313
+test-node:19746:19314
 "
 
 DIM="\033[2m"
@@ -48,6 +49,9 @@ scenario_text() {
         todo-filter)
             printf '%s' "Make the todo status filter case-insensitive and ensure the tests cover mixed-case input."
             ;;
+        client-timeout)
+            printf '%s' "Add a timeout parameter to the HTTP client, thread it through the client API, and update the tests to cover both the default behavior and an explicit timeout override."
+            ;;
         *)
             return 1
             ;;
@@ -63,6 +67,7 @@ print_scenarios() {
     echo "  snake-clone      build a Snake clone in Python"
     echo "  parser-edge-case fix quoted-comma parsing"
     echo "  todo-filter      make the todo filter case-insensitive"
+    echo "  client-timeout   add explicit timeout support to the HTTP client"
     echo ""
     echo "  Examples:"
     echo "    ./run.sh fire focus-timer"
@@ -72,7 +77,7 @@ print_scenarios() {
 }
 
 llm_base_url() {
-    printf '%s' "${LLM_BASE_URL:-http://127.0.0.1:1234/v1}"
+    printf '%s' "${LLM_BASE_URL:-http://localhost:1234/v1}"
 }
 
 doctor() {
@@ -156,7 +161,7 @@ kill_processes_matching() {
 
 stop_all() {
     say "stopping all dev-task-room processes..."
-    for script in orchestrator.py workspace_agent.py implementer.py critic.py; do
+    for script in orchestrator.py workspace_agent.py implementer.py critic.py test_strategist.py; do
         kill_processes_matching "${SCRIPT_DIR}/${script}"
     done
     for entry in $NODES; do
@@ -173,9 +178,16 @@ stop_all() {
     rm -f \
         "${GO_TMPDIR}/tailbusd-control-node.coord-fp" \
         "${GO_TMPDIR}/tailbusd-implement-node.coord-fp" \
-        "${GO_TMPDIR}/tailbusd-review-node.coord-fp"
+        "${GO_TMPDIR}/tailbusd-review-node.coord-fp" \
+        "${GO_TMPDIR}/tailbusd-test-node.coord-fp"
+    rm -rf "${COORD_DATA}"
+    rm -rf \
+        "${GO_TMPDIR}/tailbusd-control-node" \
+        "${GO_TMPDIR}/tailbusd-implement-node" \
+        "${GO_TMPDIR}/tailbusd-review-node" \
+        "${GO_TMPDIR}/tailbusd-test-node"
     rm -rf "${WORKSPACE_ROOT}"
-    good "stopped"
+    good "stopped and cleared persisted room state"
 }
 
 watch_logs() {
@@ -251,14 +263,16 @@ start_all() {
         > "${LOG_DIR}/agent-implementer.log" 2>&1 &
     TAILBUS_SOCKET="/tmp/devtaskroom-review-node.sock" LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" python3 "${SCRIPT_DIR}/critic.py" \
         > "${LOG_DIR}/agent-critic.log" 2>&1 &
+    TAILBUS_SOCKET="/tmp/devtaskroom-test-node.sock" LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" python3 "${SCRIPT_DIR}/test_strategist.py" \
+        > "${LOG_DIR}/agent-test-strategist.log" 2>&1 &
 
     sleep 2
-    for log in "${LOG_DIR}/agent-orchestrator.log" "${LOG_DIR}/agent-workspace-agent.log" "${LOG_DIR}/agent-implementer.log" "${LOG_DIR}/agent-critic.log"; do
+    for log in "${LOG_DIR}/agent-orchestrator.log" "${LOG_DIR}/agent-workspace-agent.log" "${LOG_DIR}/agent-implementer.log" "${LOG_DIR}/agent-critic.log" "${LOG_DIR}/agent-test-strategist.log"; do
         grep -q "ready" "$log" || fail "agent failed to start — check $log"
     done
 
     echo ""
-    echo -e "  ${GREEN}All running.${RESET} 1 coord + 3 daemons + 4 agents"
+    echo -e "  ${GREEN}All running.${RESET} 1 coord + 4 daemons + 5 agents"
     echo -e "  ${DIM}Open another terminal for:${RESET} ./run.sh dashboard"
     echo -e "  ${DIM}Then run:${RESET} ./run.sh fire todo-filter"
     echo ""

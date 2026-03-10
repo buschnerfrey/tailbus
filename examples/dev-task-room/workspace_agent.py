@@ -145,13 +145,14 @@ def prepare_workspace_reply(turn_id: str) -> dict[str, Any]:
     }
 
 
-async def apply_workspace_reply(turn_id: str, change_set: dict[str, Any]) -> dict[str, Any]:
+async def apply_workspace_reply(turn_id: str, iteration: int, change_set: dict[str, Any]) -> dict[str, Any]:
     ensure_workspace_exists()
     changed_paths = apply_change_set(change_set)
     test_result = await run_fixture_tests()
     return {
         "kind": "apply_result",
         "turn_id": turn_id,
+        "iteration": iteration,
         "author": agent.handle,
         "status": "ok",
         "capability": "dev.workspace.apply",
@@ -172,13 +173,15 @@ async def handle(msg: RoomEvent) -> None:
     if not payload:
         return
     kind = payload.get("kind")
-    if kind not in ("workspace_prepare_request", "apply_request"):
+    if kind not in ("task_opened", "workspace_prepare_request", "apply_request"):
         return
-    if payload.get("target_handle") not in ("", agent.handle):
+    if kind != "task_opened" and payload.get("target_handle") not in ("", agent.handle):
         return
-    if payload.get("target_capability") not in ("", "dev.workspace.apply"):
+    if kind != "task_opened" and payload.get("target_capability") not in ("", "dev.workspace.apply"):
         return
     turn_id = str(payload.get("turn_id", ""))
+    if kind == "task_opened":
+        turn_id = f"prepare:{payload.get('task_id', '')}"
     if not turn_id or turn_id in seen_turns:
         return
     seen_turns.add(turn_id)
@@ -188,10 +191,18 @@ async def handle(msg: RoomEvent) -> None:
     say(agent.handle, f"{BOLD}{kind}{RESET}")
     started = time.monotonic()
     try:
-        if kind == "workspace_prepare_request":
+        if kind in ("task_opened", "workspace_prepare_request"):
             reply = prepare_workspace_reply(turn_id)
+            if payload.get("task_id"):
+                reply["task_id"] = payload.get("task_id")
         else:
-            reply = await apply_workspace_reply(turn_id, dict(payload.get("change_set", {})))
+            reply = await apply_workspace_reply(
+                turn_id,
+                int(payload.get("iteration", 0) or 0),
+                dict(payload.get("change_set", {})),
+            )
+            if payload.get("task_id"):
+                reply["task_id"] = payload.get("task_id")
         reply["elapsed_sec"] = round(time.monotonic() - started, 1)
     except Exception as exc:
         reply = {

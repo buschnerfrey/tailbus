@@ -23,7 +23,7 @@ from tailbus import AsyncAgent, BridgeError, Manifest, RoomEvent
 
 ROOM_REPLAY_RETRIES = int(os.environ.get("DEV_TASK_ROOM_REPLAY_RETRIES", "12"))
 ROOM_REPLAY_DELAY = float(os.environ.get("DEV_TASK_ROOM_REPLAY_DELAY", "0.5"))
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:1234/v1")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:1234/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 LLM_REQUEST_TIMEOUT = float(os.environ.get("LLM_REQUEST_TIMEOUT", "180"))
 REVIEW_TIMEOUT = float(os.environ.get("REVIEW_TIMEOUT", "120"))
@@ -39,6 +39,9 @@ WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", Path(__file__).resolve().
 WORKSPACE_TEMPLATE = Path(
     os.environ.get("WORKSPACE_TEMPLATE", Path(__file__).resolve().parent / "workspace-template")
 )
+MAX_AUTONOMOUS_REVISIONS = int(os.environ.get("DEV_TASK_ROOM_MAX_REVISIONS", "2"))
+MAX_REPAIR_ATTEMPTS = int(os.environ.get("DEV_TASK_ROOM_MAX_REPAIRS", "1"))
+DEBUG_ENABLED = os.environ.get("DEV_TASK_ROOM_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 
 DIM = "\033[2m"
 BOLD = "\033[1m"
@@ -53,6 +56,7 @@ SCENARIOS: dict[str, str] = {
     "snake-clone": "Build a simple Snake clone in Python using only the standard library. Include a playable interface, food spawning, score tracking, wall and self collision, restart handling, and unit tests for the core game logic.",
     "parser-edge-case": "Extend the CSV parser so quoted commas are handled correctly and add coverage for the edge case.",
     "todo-filter": "Make the todo status filter case-insensitive and ensure the tests cover mixed-case input.",
+    "client-timeout": "Add a timeout parameter to the HTTP client, thread it through the client API, and update the tests to cover both the default behavior and an explicit timeout override.",
 }
 
 WORKSPACE_FILES: tuple[str, ...] = (
@@ -71,6 +75,11 @@ WORKSPACE_FILES: tuple[str, ...] = (
 
 def say(tag: str, msg: str) -> None:
     print(f"  {DIM}{tag}{RESET}  {msg}", flush=True)
+
+
+def debug_say(tag: str, msg: str) -> None:
+    if DEBUG_ENABLED:
+        say(tag, msg)
 
 
 def is_room_closed_error(exc: Exception) -> bool:
@@ -178,6 +187,127 @@ def room_task_from_events(events: list[RoomEvent]) -> dict[str, Any]:
         if payload and payload.get("kind") == "task_opened":
             return payload
     return {}
+
+
+def room_messages(events: list[RoomEvent]) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for event in events:
+        if event.event_type != "message_posted" or event.content_type != "application/json":
+            continue
+        payload = parse_json(event.payload)
+        if not payload:
+            continue
+        item = dict(payload)
+        item["_room_seq"] = event.room_seq
+        item["_sender_handle"] = event.sender_handle
+        messages.append(item)
+    return messages
+
+
+def _messages_by_kind(messages: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    return [item for item in messages if str(item.get("kind", "")) == kind]
+
+
+def build_room_state(events: list[RoomEvent]) -> dict[str, Any]:
+    messages = room_messages(events)
+    state: dict[str, Any] = {
+        "messages": messages,
+        "task": {},
+        "discovered": [],
+        "workspace_prepare": None,
+        "plans": [],
+        "delegations": [],
+        "implementations": [],
+        "test_plan_requests": [],
+        "test_plans": [],
+        "reviews": [],
+        "apply_requests": [],
+        "apply_results": [],
+        "final_outcome": None,
+    }
+    for payload in messages:
+        kind = str(payload.get("kind", ""))
+        if kind == "task_opened":
+            state["task"] = payload
+        elif kind == "collaborator_discovered":
+            state["discovered"].append(payload)
+        elif kind == "workspace_prepare_reply":
+            state["workspace_prepare"] = payload
+        elif kind == "plan_proposed":
+            state["plans"].append(payload)
+        elif kind == "delegation_request":
+            state["delegations"].append(payload)
+        elif kind == "implement_reply":
+            state["implementations"].append(payload)
+        elif kind == "test_plan_request":
+            state["test_plan_requests"].append(payload)
+        elif kind == "test_plan_reply":
+            state["test_plans"].append(payload)
+        elif kind == "review_reply":
+            state["reviews"].append(payload)
+        elif kind == "apply_request":
+            state["apply_requests"].append(payload)
+        elif kind == "apply_result":
+            state["apply_results"].append(payload)
+        elif kind == "final_outcome":
+            state["final_outcome"] = payload
+    return state
+
+
+def latest_successful_implementation(state: dict[str, Any]) -> dict[str, Any] | None:
+    successful = [item for item in state.get("implementations", []) if item.get("status") == "ok"]
+    return successful[-1] if successful else None
+
+
+def implementation_for_iteration(state: dict[str, Any], iteration: int) -> dict[str, Any] | None:
+    for item in reversed(state.get("implementations", [])):
+        if int(item.get("iteration", 0) or 0) == iteration:
+            return item
+    return None
+
+
+def review_for_iteration(state: dict[str, Any], iteration: int) -> dict[str, Any] | None:
+    for item in reversed(state.get("reviews", [])):
+        if int(item.get("iteration", 0) or 0) == iteration:
+            return item
+    return None
+
+
+def test_plan_for_iteration(state: dict[str, Any], iteration: int) -> dict[str, Any] | None:
+    for item in reversed(state.get("test_plans", [])):
+        if int(item.get("iteration", 0) or 0) == iteration:
+            return item
+    return None
+
+
+def apply_request_for_iteration(state: dict[str, Any], iteration: int) -> dict[str, Any] | None:
+    for item in reversed(state.get("apply_requests", [])):
+        if int(item.get("iteration", 0) or 0) == iteration:
+            return item
+    return None
+
+
+def apply_result_for_iteration(state: dict[str, Any], iteration: int) -> dict[str, Any] | None:
+    for item in reversed(state.get("apply_results", [])):
+        if int(item.get("iteration", 0) or 0) == iteration:
+            return item
+    return None
+
+
+def implementation_count(state: dict[str, Any], *, reason: str | None = None) -> int:
+    items = state.get("implementations", [])
+    if reason is None:
+        return len(items)
+    return sum(1 for item in items if str(item.get("reason", "")) == reason)
+
+
+def current_iteration(state: dict[str, Any]) -> int:
+    latest = latest_successful_implementation(state)
+    return int(latest.get("iteration", 0) or 0) if latest else 0
+
+
+def next_iteration(state: dict[str, Any]) -> int:
+    return current_iteration(state) + 1
 
 
 def llm_call(system: str, user: str, *, temperature: float = 0.2, max_tokens: int = 4096) -> str:
@@ -560,32 +690,70 @@ async def run_codex_json(prompt: str, output_file: str, timeout: int = CODEX_TIM
 
 
 ROOM_REPLAY_TIMEOUT = float(os.environ.get("DEV_TASK_ROOM_REPLAY_TIMEOUT", "15"))
+ROOM_REPLAY_CACHE_MAX = int(os.environ.get("DEV_TASK_ROOM_REPLAY_CACHE_MAX", "2048"))
+_ROOM_REPLAY_CACHE: dict[str, list[RoomEvent]] = {}
 
 
 async def replay_room_with_retry(agent: AsyncAgent, room_id: str) -> list[RoomEvent]:
     last_error: Exception | None = None
     for attempt in range(ROOM_REPLAY_RETRIES):
         try:
-            say(agent.handle, f"replay_room attempt {attempt + 1}/{ROOM_REPLAY_RETRIES} for {room_id[:12]}...")
+            cached = _ROOM_REPLAY_CACHE.get(room_id, [])
+            since_seq = cached[-1].room_seq if cached else 0
+            debug_say(
+                agent.handle,
+                f"replay_room attempt {attempt + 1}/{ROOM_REPLAY_RETRIES} for {room_id[:12]}... since_seq={since_seq}",
+            )
             events = await asyncio.wait_for(
-                agent.replay_room(room_id),
+                agent.replay_room(room_id, since_seq=since_seq),
                 timeout=ROOM_REPLAY_TIMEOUT,
             )
-            say(agent.handle, f"replay_room returned {len(events)} events")
-            return events
+            if since_seq == 0:
+                merged = list(events)
+            elif not events:
+                merged = cached
+            else:
+                merged = cached + list(events)
+            if len(merged) > ROOM_REPLAY_CACHE_MAX:
+                merged = merged[-ROOM_REPLAY_CACHE_MAX:]
+            _ROOM_REPLAY_CACHE[room_id] = merged
+            debug_say(
+                agent.handle,
+                f"replay_room returned {len(events)} delta event(s), cached={len(merged)}",
+            )
+            return list(merged)
         except asyncio.TimeoutError:
             last_error = TimeoutError(
                 f"replay_room timed out after {ROOM_REPLAY_TIMEOUT}s on attempt {attempt + 1}"
             )
-            say(agent.handle, f"{YELLOW}replay_room timed out{RESET} after {ROOM_REPLAY_TIMEOUT}s (attempt {attempt + 1})")
+            debug_say(agent.handle, f"{YELLOW}replay_room timed out{RESET} after {ROOM_REPLAY_TIMEOUT}s (attempt {attempt + 1})")
         except Exception as exc:
             last_error = exc
-            say(agent.handle, f"{YELLOW}replay_room failed{RESET} (attempt {attempt + 1}): {exc}")
+            debug_say(agent.handle, f"{YELLOW}replay_room failed{RESET} (attempt {attempt + 1}): {exc}")
         if attempt < ROOM_REPLAY_RETRIES - 1:
             await asyncio.sleep(ROOM_REPLAY_DELAY)
     assert last_error is not None
-    say(agent.handle, f"{RED}replay_room gave up{RESET} after {ROOM_REPLAY_RETRIES} attempts: {last_error}")
+    debug_say(agent.handle, f"{RED}replay_room gave up{RESET} after {ROOM_REPLAY_RETRIES} attempts: {last_error}")
     raise last_error
+
+
+async def wait_for_room_message(
+    agent: AsyncAgent,
+    room_id: str,
+    predicate: Callable[[dict[str, Any]], bool],
+    *,
+    timeout: float,
+    poll_interval: float = 1.0,
+) -> tuple[dict[str, Any], list[RoomEvent]]:
+    deadline = time.monotonic() + timeout
+    while True:
+        events = await replay_room_with_retry(agent, room_id)
+        for payload in reversed(room_messages(events)):
+            if predicate(payload):
+                return payload, events
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"timed out waiting for room message after {timeout:.0f}s")
+        await asyncio.sleep(poll_interval)
 
 
 def render_llm_transcript(events: list[RoomEvent], *, limit_chars: int = 16000) -> str:
@@ -610,6 +778,8 @@ def render_llm_transcript(events: list[RoomEvent], *, limit_chars: int = 16000) 
                 f"target_capability={payload.get('target_capability', '')}\n"
                 f"reasons={','.join(str(item) for item in payload.get('match_reasons', []))}"
             )
+        elif kind in ("plan_proposed", "delegation_request"):
+            parts.append(f"[{kind}]\n{json.dumps(payload, indent=2, sort_keys=True)}")
         elif kind.endswith("_request"):
             parts.append(
                 f"[{kind}]\n"
@@ -617,7 +787,7 @@ def render_llm_transcript(events: list[RoomEvent], *, limit_chars: int = 16000) 
                 f"target_capability={payload.get('target_capability', '')}\n"
                 f"instruction={payload.get('instruction', '')}"
             )
-        elif kind.endswith("_reply") or kind in ("apply_result", "test_result", "final_summary"):
+        elif kind.endswith("_reply") or kind in ("apply_result", "test_result", "final_summary", "final_outcome"):
             parts.append(f"[{kind}]\n{json.dumps(payload, indent=2, sort_keys=True)}")
     text = "\n\n".join(parts)
     if len(text) > limit_chars:
@@ -645,27 +815,48 @@ def render_markdown_transcript(events: list[RoomEvent]) -> str:
                 prefix
                 + f"discovered `{payload.get('target_handle', '?')}` for `{payload.get('target_capability', '?')}`"
             )
+        elif kind == "plan_proposed":
+            lines.append(prefix + f"plan proposed by `{payload.get('author', event.sender_handle)}`")
+            lines.append(f"  summary: {payload.get('summary', '')}")
+        elif kind == "delegation_request":
+            lines.append(
+                prefix
+                + f"`{payload.get('author', event.sender_handle)}` delegated to `{payload.get('target_handle', payload.get('target_capability', '?'))}`"
+            )
+            lines.append(f"  reason: {payload.get('summary', payload.get('instruction', ''))}")
         elif kind.endswith("_request"):
             lines.append(prefix + f"{kind} -> `{payload.get('target_handle', payload.get('target_capability', '?'))}`")
             lines.append(f"  instruction: {payload.get('instruction', '')}")
         elif kind == "implement_reply":
-            lines.append(prefix + f"implementer reply status={payload.get('status', 'unknown')}")
+            lines.append(
+                prefix
+                + f"implementer reply iteration={payload.get('iteration', '?')} status={payload.get('status', 'unknown')}"
+            )
             lines.append(f"  summary: {payload.get('summary', '')}")
+        elif kind == "test_plan_reply":
+            lines.append(prefix + f"test plan iteration={payload.get('iteration', '?')} decision={payload.get('decision', 'unknown')}")
+            for item in payload.get("required_tests", []):
+                lines.append(f"  required test: {item}")
         elif kind == "review_reply":
-            lines.append(prefix + f"review reply status={payload.get('status', 'unknown')}")
+            lines.append(
+                prefix
+                + f"review reply iteration={payload.get('iteration', '?')} decision={payload.get('decision', 'unknown')}"
+            )
             if payload.get("findings"):
                 for finding in payload["findings"]:
                     lines.append(f"  finding: {finding}")
         elif kind == "apply_result":
-            lines.append(prefix + f"apply result status={payload.get('status', 'unknown')}")
+            lines.append(
+                prefix
+                + f"apply result iteration={payload.get('iteration', '?')} status={payload.get('status', 'unknown')}"
+            )
             for path in payload.get("changed_paths", []):
                 lines.append(f"  changed: {path}")
-        elif kind == "test_result":
-            lines.append(prefix + f"test result status={payload.get('status', 'unknown')}")
-            if payload.get("summary"):
-                lines.append(f"  summary: {payload['summary']}")
-        elif kind == "final_summary":
-            lines.append(prefix + "final summary posted")
+            if payload.get("test_result", {}).get("summary"):
+                lines.append(f"  tests: {payload['test_result']['summary']}")
+        elif kind == "final_outcome":
+            lines.append(prefix + f"final outcome status={payload.get('status', 'unknown')}")
+            lines.append(f"  summary: {payload.get('summary', '')}")
         else:
             lines.append(prefix + kind)
     return "\n".join(lines)
@@ -730,6 +921,7 @@ def build_output_markdown(
     test_result: dict[str, Any],
     events: list[RoomEvent],
 ) -> str:
+    final_outcome = build_room_state(events).get("final_outcome")
     lines = [
         f"# Dev Task Room — {task_info.get('title', '')}",
         "",
@@ -770,10 +962,18 @@ def build_output_markdown(
             f"- Status: {test_result.get('status', 'unknown')}",
             f"- Summary: {test_result.get('summary', '')}",
             "",
-            render_markdown_transcript(events),
-            "",
         ]
     )
+    if final_outcome:
+        lines.extend(
+            [
+                "## Final Outcome",
+                f"- Status: {final_outcome.get('status', 'unknown')}",
+                f"- Summary: {final_outcome.get('summary', '')}",
+                "",
+            ]
+        )
+    lines.extend([render_markdown_transcript(events), ""])
     return "\n".join(lines).rstrip() + "\n"
 
 
