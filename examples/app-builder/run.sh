@@ -19,10 +19,15 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [ -d "${REPO_ROOT}/bin" ]; then
+    export PATH="${REPO_ROOT}/bin:${PATH}"
+fi
 COORD_ADDR="127.0.0.1:18443"
 COORD_HEALTH=":18081"
 COORD_DATA="/tmp/appbuilder-coord"
 LOG_DIR="/tmp/appbuilder-logs"
+OUTPUT_DIR="${OUTPUT_DIR:-${SCRIPT_DIR}/output}"
 
 # Node definitions: name:listen_port:metrics_port:script
 NODES="
@@ -44,6 +49,41 @@ say()  { echo -e "  ${DIM}run.sh${RESET}  $*"; }
 good() { echo -e "  ${DIM}run.sh${RESET}  ${GREEN}✓${RESET} $*"; }
 warn() { echo -e "  ${DIM}run.sh${RESET}  ${YELLOW}!${RESET} $*"; }
 fail() { echo -e "  ${DIM}run.sh${RESET}  ${RED}✗${RESET} $*"; exit 1; }
+
+llm_base_url() {
+    printf '%s' "${LLM_BASE_URL:-http://localhost:1234/v1}"
+}
+
+doctor() {
+    echo ""
+    echo -e "  ${BOLD}App Builder Doctor${RESET}"
+    echo -e "  ${DIM}────────────────────────────────────────${RESET}"
+    echo ""
+    for tool in tailbus-coord tailbusd tailbus python3 curl; do
+        command -v "$tool" >/dev/null 2>&1 || fail "$tool not found in PATH"
+        good "$tool found"
+    done
+    curl -sf "$(llm_base_url)/models" >/dev/null 2>&1 || fail "LM Studio not reachable at $(llm_base_url)"
+    good "LM Studio reachable at $(llm_base_url)"
+    local model_count
+    model_count=$(curl -sf "$(llm_base_url)/models" 2>/dev/null \
+        | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('data',[])))" 2>/dev/null || echo 0)
+    [ "$model_count" -gt 0 ] || fail "LM Studio has no models loaded — open LM Studio and load a model"
+    good "LM Studio has ${model_count} model(s) loaded"
+    if command -v claude >/dev/null 2>&1; then
+        good "claude found"
+    else
+        warn "claude not found — claude-coder will error if selected"
+    fi
+    if command -v codex >/dev/null 2>&1; then
+        good "codex found"
+    else
+        warn "codex not found — codex-coder will error if selected"
+    fi
+    echo ""
+    echo -e "  ${DIM}Next:${RESET} ./run.sh && ./run.sh fire \"A todo app with HTML, CSS, and vanilla JS\""
+    echo ""
+}
 
 # ── Stop ─────────────────────────────────────────────────────────────────────
 
@@ -80,8 +120,24 @@ stop_all() {
 
     # Clean up sockets
     rm -f /tmp/appbuilder-*.sock
+    rm -f \
+        /tmp/tailbusd-orchestrator.coord-fp \
+        /tmp/tailbusd-claude-coder.coord-fp \
+        /tmp/tailbusd-codex-coder.coord-fp \
+        /tmp/tailbusd-lmstudio-coder.coord-fp
 
     good "stopped"
+}
+
+clean_all() {
+    stop_all 2>/dev/null || true
+    rm -rf "$COORD_DATA" "$LOG_DIR" "$OUTPUT_DIR"
+    rm -rf \
+        /tmp/tailbusd-orchestrator \
+        /tmp/tailbusd-claude-coder \
+        /tmp/tailbusd-codex-coder \
+        /tmp/tailbusd-lmstudio-coder
+    good "cleaned logs, outputs, and persisted state"
 }
 
 # ── Fire ─────────────────────────────────────────────────────────────────────
@@ -119,19 +175,23 @@ watch_logs() {
         2>/dev/null
 }
 
+launch_dashboard() {
+    local sock="/tmp/appbuilder-orchestrator.sock"
+    if [ ! -S "$sock" ]; then
+        fail "orchestrator not running (no socket at $sock)"
+    fi
+    exec tailbus -socket "$sock" dashboard
+}
+
 # ── Start ────────────────────────────────────────────────────────────────────
 
 start_all() {
-    # Check binaries
-    command -v tailbus-coord >/dev/null || fail "tailbus-coord not found in PATH"
-    command -v tailbusd >/dev/null      || fail "tailbusd not found in PATH"
-    command -v tailbus >/dev/null       || fail "tailbus not found in PATH"
-    command -v python3 >/dev/null       || fail "python3 not found in PATH"
+    doctor >/dev/null
 
     # Stop anything already running
     stop_all 2>/dev/null || true
 
-    mkdir -p "$LOG_DIR" "$COORD_DATA"
+    mkdir -p "$LOG_DIR" "$COORD_DATA" "$OUTPUT_DIR"
 
     echo ""
     echo -e "  ${BOLD}App Builder — Multi-Node Demo${RESET}"
@@ -230,6 +290,15 @@ case "${1:-start}" in
     stop)
         stop_all
         ;;
+    clean)
+        clean_all
+        ;;
+    doctor)
+        doctor
+        ;;
+    dashboard)
+        launch_dashboard
+        ;;
     fire)
         if [ -z "${2:-}" ]; then
             fail "usage: ./run.sh fire \"description of the app\""
@@ -239,11 +308,16 @@ case "${1:-start}" in
     logs|watch)
         watch_logs
         ;;
+    demo)
+        start_all
+        echo ""
+        fire_build "A todo app with HTML, CSS, and vanilla JS. Local storage, add/delete/toggle."
+        ;;
     start|"")
         start_all
         ;;
     *)
-        echo "usage: ./run.sh [start|stop|fire \"app description\"|logs]"
+        echo "usage: ./run.sh [start|stop|clean|doctor|dashboard|fire \"app description\"|logs|demo]"
         exit 1
         ;;
 esac

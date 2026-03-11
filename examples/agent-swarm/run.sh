@@ -49,6 +49,9 @@ doctor() {
         (cd "${REPO_ROOT}" && go build -o bin/swarm-demo ./examples/agent-swarm/) || fail "go build failed"
     fi
     good "swarm-demo binary ready"
+    good "no external LLM or network dependency required"
+    echo ""
+    echo -e "  ${DIM}Next:${RESET} ./run.sh demo"
     echo ""
 }
 
@@ -131,6 +134,17 @@ stop_all() {
         rm -f "${GO_TMPDIR}/tailbusd-${name}.coord-fp"
     done
     good "stopped"
+}
+
+clean_all() {
+    stop_all 2>/dev/null || true
+    rm -rf "${COORD_DATA}" "${LOG_DIR}"
+    for entry in $NODES; do
+        local name listen_port metrics_port
+        IFS=: read -r name listen_port metrics_port <<< "$entry"
+        rm -rf "${GO_TMPDIR}/tailbusd-${name}"
+    done
+    good "cleaned logs and persisted state"
 }
 
 watch_logs() {
@@ -232,6 +246,7 @@ fire_analyze() {
 case "${1:-start}" in
     start) start_all ;;
     stop) stop_all ;;
+    clean) clean_all ;;
     logs) watch_logs ;;
     doctor) doctor ;;
     dashboard) launch_dashboard ;;
@@ -251,7 +266,7 @@ case "${1:-start}" in
         ;;
     *)
         cat <<EOF
-Usage: ./run.sh [start|stop|logs|doctor|dashboard|fire|demo]
+Usage: ./run.sh [start|stop|clean|logs|doctor|dashboard|fire|demo]
 EOF
         exit 1
         ;;

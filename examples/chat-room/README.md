@@ -3,6 +3,14 @@
 Interactive multi-agent chat: you type, two LLM agents respond. Each agent
 has a distinct personality and runs on its own daemon node.
 
+Best for: the fastest way to feel what a Tailbus room is.
+
+## Why this example matters
+
+This is the easiest example to understand viscerally. You join the room as a
+human participant, the agents see the shared transcript, and the difference
+between direct sessions and room-based collaboration becomes obvious quickly.
+
 ## What it demonstrates
 
 - **Interactive room participation**: human agent alongside AI agents in real-time
@@ -28,6 +36,7 @@ has a distinct personality and runs on its own daemon node.
 ```bash
 make build
 cd examples/chat-room
+./run.sh doctor
 
 # Terminal 1: start the infrastructure and agents
 ./run.sh start
@@ -38,6 +47,19 @@ cd examples/chat-room
 # Terminal 3: open the chat
 ./run.sh chat
 ```
+
+If you want a full reset after a run:
+
+```bash
+./run.sh clean
+```
+
+## What to watch for
+
+- the room forming around `you`, `atlas`, and `nova`
+- both agents reacting to the same shared context
+- `@atlas` and `@nova` mentions steering participation without changing topology
+- the dashboard showing human and AI room participation together
 
 ## Usage
 
@@ -73,3 +95,11 @@ control-node ── you     (human, chat.py)
 atlas-node ──── atlas   (LLM, analytical)
 nova-node ───── nova    (LLM, creative)
 ```
+
+## Output
+
+This example is live and transient:
+
+- room traffic is visible in the dashboard
+- logs are written to `/tmp/chatroom-logs/`
+- `./run.sh clean` removes persisted local state and logs

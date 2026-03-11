@@ -2,6 +2,10 @@
 
 This is the Tailbus flagship example.
 
+Best for: the clearest overall Tailbus product story.
+
+## Why this example matters
+
 It shows the product boundary clearly:
 
 - different agents on different nodes
@@ -9,6 +13,53 @@ It shows the product boundary clearly:
 - capability discovery instead of hardcoded routing
 - one room as the replayable incident bridge
 - live dashboard visibility across the mesh
+
+This is the demo that best answers “what is Tailbus for?” without needing any
+other context.
+
+## Requirements
+
+- `tailbus`, `tailbusd`, `tailbus-coord` built into the repo `bin/` directory
+- `python3`
+- `curl`
+- no external LLM dependency in default mode
+
+Optional for the LLM-backed variant:
+
+- LM Studio at `http://localhost:1234/v1`
+- `codex` CLI installed and authenticated
+
+## Quick start
+
+Deterministic:
+
+```bash
+cd /Users/alexanderfrey/Projects/tailbus
+make build
+cd examples/incident-room
+./run.sh doctor
+./run.sh
+./run.sh fire checkout
+```
+
+LLM-backed:
+
+```bash
+cd /Users/alexanderfrey/Projects/tailbus
+make build
+cd examples/incident-room
+./run-llm.sh doctor
+./run-llm.sh
+./run.sh fire checkout
+```
+
+## What to watch for
+
+- `support-triage` discovering the orchestrator by capability
+- the orchestrator discovering specialists instead of hardcoding handles
+- one shared incident room accumulating departmental evidence
+- dashboard activity revealing discovery before work assignment
+- a customer-facing status update and internal summary emerging from the same room
 
 ## What happens
 
@@ -44,37 +95,6 @@ It shows the product boundary clearly:
 Each node has its own daemon. Tailbus routes discovery, room traffic, and dashboard activity across the mesh.
 
 ## Run
-
-### Fastest path
-
-Deterministic:
-
-```bash
-cd /Users/alexanderfrey/Projects/tailbus
-make build
-cd examples/incident-room
-./run.sh doctor
-./run.sh
-./run.sh dashboard
-```
-
-In another terminal:
-
-```bash
-./run.sh scenarios
-./run.sh fire checkout
-```
-
-LLM-backed:
-
-```bash
-cd /Users/alexanderfrey/Projects/tailbus
-make build
-cd examples/incident-room
-./run-llm.sh doctor
-./run-llm.sh
-./run.sh dashboard
-```
 
 If LM Studio or Codex is unavailable, the launcher degrades gracefully:
 
@@ -117,6 +137,7 @@ Stop:
 
 ```bash
 ./run.sh stop
+./run.sh clean
 ```
 
 ### LLM-backed mode
@@ -125,12 +146,6 @@ This variant keeps the same incident-room flow, but adds:
 
 - `lmstudio-analyst` for room-level root-cause synthesis
 - `codex-status-agent` for customer-facing update drafting
-
-Prerequisites:
-
-- LM Studio running locally at `http://localhost:1234/v1`
-- `codex` CLI installed and authenticated
-- a small OpenAI model available to Codex
 
 Run it:
 
@@ -193,18 +208,6 @@ The transcript now also includes:
 
 - when the investigation officially started
 - which specialists were selected and why
-
-## Why this demo matters
-
-Most agent demos stop at one runtime and one orchestrator.
-
-This one shows what Tailbus is actually for:
-
-- heterogeneous agent systems connected over a mesh
-- cross-department collaboration without one giant runtime
-- daemon-managed rooms as shared conversation state
-- capability-driven specialist lookup
-- observability in the dashboard while the incident is live
 
 The LLM-backed variant adds one more important point:
 

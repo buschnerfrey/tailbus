@@ -32,6 +32,31 @@ say()  { echo -e "  ${DIM}run.sh${RESET}  $*"; }
 good() { echo -e "  ${DIM}run.sh${RESET}  ${GREEN}✓${RESET} $*"; }
 fail() { echo -e "  ${DIM}run.sh${RESET}  ${RED}✗${RESET} $*"; exit 1; }
 
+llm_base_url() {
+    printf '%s' "${LLM_BASE_URL:-http://localhost:1234/v1}"
+}
+
+doctor() {
+    echo ""
+    echo -e "  ${BOLD}Pair Solver Doctor${RESET}"
+    echo -e "  ${DIM}────────────────────────────────────────${RESET}"
+    echo ""
+    for tool in tailbus-coord tailbusd tailbus python3 curl codex; do
+        command -v "$tool" >/dev/null 2>&1 || fail "$tool not found in PATH"
+        good "$tool found"
+    done
+    curl -sf "$(llm_base_url)/models" >/dev/null 2>&1 || fail "LM Studio not reachable at $(llm_base_url)"
+    good "LM Studio reachable at $(llm_base_url)"
+    local model_count
+    model_count=$(curl -sf "$(llm_base_url)/models" 2>/dev/null \
+        | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('data',[])))" 2>/dev/null || echo 0)
+    [ "$model_count" -gt 0 ] || fail "LM Studio has no models loaded — open LM Studio and load a model"
+    good "LM Studio has ${model_count} model(s) loaded"
+    echo ""
+    echo -e "  ${DIM}Next:${RESET} ./run.sh && ./run.sh fire \"Write a Python function that finds the longest palindromic substring\""
+    echo ""
+}
+
 kill_pid_list() {
     local sig="$1"
     shift || true
@@ -131,6 +156,16 @@ stop_all() {
     good "stopped"
 }
 
+clean_all() {
+    stop_all 2>/dev/null || true
+    rm -rf "${COORD_DATA}" "${LOG_DIR}" "${SCRIPT_DIR}/output"
+    rm -rf \
+        "${GO_TMPDIR}/tailbusd-orchestrator" \
+        "${GO_TMPDIR}/tailbusd-codex-solver" \
+        "${GO_TMPDIR}/tailbusd-lmstudio-solver"
+    good "cleaned logs, outputs, and persisted state"
+}
+
 fire_problem() {
     local problem="$1"
     local sock="/tmp/pairsolver-orchestrator.sock"
@@ -163,12 +198,16 @@ watch_logs() {
         2>/dev/null
 }
 
+launch_dashboard() {
+    local sock="/tmp/pairsolver-orchestrator.sock"
+    if [ ! -S "$sock" ]; then
+        fail "orchestrator not running (no socket at $sock)"
+    fi
+    exec tailbus -socket "$sock" dashboard
+}
+
 start_all() {
-    command -v tailbus-coord >/dev/null || fail "tailbus-coord not found in PATH"
-    command -v tailbusd >/dev/null || fail "tailbusd not found in PATH"
-    command -v tailbus >/dev/null || fail "tailbus not found in PATH"
-    command -v python3 >/dev/null || fail "python3 not found in PATH"
-    command -v curl >/dev/null || fail "curl not found in PATH"
+    doctor >/dev/null
 
     stop_all 2>/dev/null || true
 
@@ -256,8 +295,20 @@ start_all() {
 }
 
 case "${1:-start}" in
+    start|"")
+        start_all
+        ;;
     stop)
         stop_all
+        ;;
+    clean)
+        clean_all
+        ;;
+    doctor)
+        doctor
+        ;;
+    dashboard)
+        launch_dashboard
         ;;
     fire)
         if [ -z "${2:-}" ]; then
@@ -268,11 +319,13 @@ case "${1:-start}" in
     logs|watch)
         watch_logs
         ;;
-    start|"")
+    demo)
         start_all
+        echo ""
+        fire_problem "Write a Python function that finds the longest palindromic substring"
         ;;
     *)
-        echo "usage: ./run.sh [start|stop|fire \"problem statement\"|logs]"
+        echo "usage: ./run.sh [start|stop|clean|doctor|dashboard|fire \"problem statement\"|logs|demo]"
         exit 1
         ;;
 esac

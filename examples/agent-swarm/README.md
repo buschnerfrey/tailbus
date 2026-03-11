@@ -3,6 +3,14 @@
 Five pure Go agents analyze the tailbus codebase in parallel — no external
 dependencies, completes in seconds, shows the mesh at full speed.
 
+Best for: the fastest deterministic Tailbus demo with no LLM dependency.
+
+## Why this example matters
+
+This is the cleanest proof that Tailbus is not tied to Python or LLMs.
+It shows a visible multi-node mesh, capability-based work splitting, and
+room-backed coordination using only Go agents and local code analysis.
+
 ## What it demonstrates
 
 - **Go agents via gRPC**: direct connection to daemon Unix sockets (no Python SDK)
@@ -22,8 +30,16 @@ No Python, no LLM, no network access required.
 ```bash
 make build
 cd examples/agent-swarm
+./run.sh doctor
 ./run.sh demo          # build + start → fire → stop (fully unattended, ~10s)
 ```
+
+## What to watch for
+
+- one orchestrator discovering and fanning out to four specialists
+- all five nodes showing up distinctly in the dashboard
+- parallel room activity without any external model dependency
+- a final summary that was assembled from multiple agent replies
 
 ## Manual run
 
@@ -32,6 +48,7 @@ cd examples/agent-swarm
 ./run.sh dashboard     # (in another terminal) watch the TUI
 ./run.sh fire          # analyze the tailbus repo
 ./run.sh stop
+./run.sh clean         # remove persisted state and logs
 ```
 
 ## Agents
@@ -59,3 +76,11 @@ complexity-node ─ complexity-gauge
 
 The orchestrator creates a room, fans out `analyze_request` messages, collects
 all `analyze_reply` messages, and resolves the calling session with a summary.
+
+## Output
+
+This example is transient by default:
+
+- live logs: `/tmp/agentswarm-logs/`
+- coord state: `/tmp/agentswarm-coord/`
+- no checked-in output artifacts are produced

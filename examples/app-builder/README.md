@@ -2,6 +2,23 @@
 
 Three AI coding agents collaborate via Tailbus to build an app from a natural language description. Each agent independently generates code for every file, then a consensus step merges the best parts.
 
+Best for: a flashy multi-coder demo once the simpler room examples already make sense.
+
+## Why this example matters
+
+This demo emphasizes mesh topology and multi-agent coding fan-out. It is less
+about rooms as the primary abstraction and more about showing several coding
+agents collaborating across separate daemons while the dashboard stays busy.
+
+## Requirements
+
+- `tailbus`, `tailbusd`, `tailbus-coord` built (`make build`)
+- `python3`
+- `curl`
+- [LM Studio](https://lmstudio.ai/) running with a code-capable model loaded
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI optional
+- [OpenAI Codex](https://openai.com/index/codex/) CLI optional
+
 ## Architecture
 
 ```
@@ -30,21 +47,18 @@ User → tailbus fire orchestrator '{"app": "a todo app"}'
 
 Each agent runs on its own tailbus daemon — the mesh routes messages between them over P2P gRPC. The dashboard shows the full topology with animated message flow.
 
-## Prerequisites
-
-- `tailbusd` and `tailbus-coord` built (`make build`)
-- [LM Studio](https://lmstudio.ai/) running with a code-capable model loaded
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI installed (optional)
-- [OpenAI Codex](https://openai.com/index/codex/) CLI installed (optional)
-
-## Quick Start
+## Quick start
 
 ```bash
+make build
+cd examples/app-builder
+./run.sh doctor
+
 # Start everything: 1 coord + 4 daemons + 4 agents
 ./run.sh
 
 # Open the dashboard — watch the mesh topology
-tailbus -socket /tmp/appbuilder-orchestrator.sock dashboard
+./run.sh dashboard
 
 # In another terminal, watch the agent conversation
 ./run.sh logs
@@ -54,15 +68,15 @@ tailbus -socket /tmp/appbuilder-orchestrator.sock dashboard
 
 # When done
 ./run.sh stop
+./run.sh clean
 ```
 
-## What You'll See
+## What to watch for
 
-**Dashboard** — 4 node boxes connected by edges. When the build runs, arrows animate between the orchestrator and each coder in parallel. The FLOW line shows active session chains.
-
-**Agent logs** (`./run.sh logs`) — a conversation-style transcript showing the orchestrator delegating work, coders generating code, and the consensus step merging results.
-
-**Output** — generated files land in `./output/<app-slug>/`.
+- the orchestrator planning through `lmstudio-coder`
+- per-file fan-out to multiple coding agents in parallel
+- consensus/merge behavior after competing implementations return
+- a visibly busy mesh in the dashboard rather than one linear chain
 
 ## Agents
 
@@ -81,6 +95,16 @@ tailbus -socket /tmp/appbuilder-orchestrator.sock dashboard
 4. **Write** — Merged files are written to the output directory
 
 If a coder times out or errors, consensus proceeds with the remaining implementations.
+
+## Output
+
+Generated files land in:
+
+- `examples/app-builder/output/<app-slug>/`
+
+Operational logs land in:
+
+- `/tmp/appbuilder-logs/`
 
 ## Network Topology
 

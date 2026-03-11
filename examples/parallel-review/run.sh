@@ -56,6 +56,8 @@ doctor() {
     [ "$model_count" -gt 0 ] || fail "LM Studio has no models loaded — open LM Studio and load a model"
     good "LM Studio has ${model_count} model(s) loaded"
     echo ""
+    echo -e "  ${DIM}Next:${RESET} ./run.sh demo"
+    echo ""
 }
 
 kill_pid_list() {
@@ -139,6 +141,17 @@ stop_all() {
         "${GO_TMPDIR}/tailbusd-perf-node.coord-fp" \
         "${GO_TMPDIR}/tailbusd-style-node.coord-fp"
     good "stopped"
+}
+
+clean_all() {
+    stop_all 2>/dev/null || true
+    rm -rf "${COORD_DATA}" "${LOG_DIR}" "${OUTPUT_DIR}"
+    rm -rf \
+        "${GO_TMPDIR}/tailbusd-control-node" \
+        "${GO_TMPDIR}/tailbusd-security-node" \
+        "${GO_TMPDIR}/tailbusd-perf-node" \
+        "${GO_TMPDIR}/tailbusd-style-node"
+    good "cleaned logs, outputs, and persisted state"
 }
 
 watch_logs() {
@@ -269,6 +282,7 @@ print_scenarios() {
 case "${1:-start}" in
     start) start_all ;;
     stop) stop_all ;;
+    clean) clean_all ;;
     logs) watch_logs ;;
     doctor) doctor ;;
     dashboard) launch_dashboard ;;
@@ -291,7 +305,7 @@ case "${1:-start}" in
         ;;
     *)
         cat <<EOF
-Usage: ./run.sh [start|stop|logs|doctor|dashboard|scenarios|fire|demo]
+Usage: ./run.sh [start|stop|clean|logs|doctor|dashboard|scenarios|fire|demo]
 EOF
         exit 1
         ;;

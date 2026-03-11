@@ -53,6 +53,8 @@ doctor() {
     [ "$model_count" -gt 0 ] || fail "LM Studio has no models loaded — open LM Studio and load a model"
     good "LM Studio has ${model_count} model(s) loaded"
     echo ""
+    echo -e "  ${DIM}Next:${RESET} ./run.sh start && ./run.sh chat"
+    echo ""
 }
 
 kill_pid_list() {
@@ -135,6 +137,17 @@ stop_all() {
         rm -f "${GO_TMPDIR}/tailbusd-${name}.coord-fp"
     done
     good "stopped"
+}
+
+clean_all() {
+    stop_all 2>/dev/null || true
+    rm -rf "${COORD_DATA}" "${LOG_DIR}"
+    for entry in $NODES; do
+        local name listen_port metrics_port
+        IFS=: read -r name listen_port metrics_port <<< "$entry"
+        rm -rf "${GO_TMPDIR}/tailbusd-${name}"
+    done
+    good "cleaned logs and persisted state"
 }
 
 watch_logs() {
@@ -235,16 +248,18 @@ launch_chat() {
 case "${1:-start}" in
     start) start_all ;;
     stop) stop_all ;;
+    clean) clean_all ;;
     logs) watch_logs ;;
     doctor) doctor ;;
     dashboard) launch_dashboard ;;
     chat) launch_chat ;;
     *)
         cat <<EOF
-Usage: ./run.sh [start|stop|logs|doctor|dashboard|chat]
+Usage: ./run.sh [start|stop|clean|logs|doctor|dashboard|chat]
 
   start      start coord, daemons, and chat agents
   chat       open the interactive chat terminal
+  clean      remove logs and persisted daemon state
   dashboard  launch the TUI dashboard
   logs       tail agent logs
   stop       stop everything

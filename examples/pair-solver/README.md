@@ -2,6 +2,14 @@
 
 This example shows how Tailbus rooms change the collaboration model.
 
+Best for: understanding replayable room state without a fully agentic workflow.
+
+## Why this example matters
+
+This demo isolates the room primitive itself. It is useful when you want to
+show why shared replayable state matters even before moving to more autonomous
+agent behavior.
+
 The orchestrator still controls turn-taking, but it no longer forwards copied history between agents. Instead:
 
 - the orchestrator creates one shared room
@@ -10,7 +18,7 @@ The orchestrator still controls turn-taking, but it no longer forwards copied hi
 - each solver rebuilds context by replaying the room transcript
 - the final markdown output is generated from room replay
 
-## Why this demo matters
+## What it demonstrates
 
 It demonstrates the new room primitive directly:
 
@@ -19,32 +27,49 @@ It demonstrates the new room primitive directly:
 - replayable room history
 - orchestrated turns without pretending rooms replace control flow
 
-## Run
+## Requirements
+
+- `tailbus`, `tailbusd`, `tailbus-coord` built (`make build`)
+- `python3`
+- `curl`
+- `codex` CLI on `PATH`
+- LM Studio running locally with a loaded model
+
+## Quick start
 
 ```bash
 cd /Users/alexanderfrey/Projects/tailbus
 make build
 cd examples/pair-solver
-bash run.sh
-bash run.sh fire "Write a Python function that finds the longest palindromic substring"
+./run.sh doctor
+./run.sh
+./run.sh fire "Write a Python function that finds the longest palindromic substring"
 ```
+
+## What to watch for
+
+- one orchestrator controlling turns while both solvers read the same room state
+- replay replacing copied prompt history between agents
+- structured room events like `PROBLEM`, `TURN`, `REPLY`, and `FINAL`
+- the final markdown being assembled from room history rather than transient local state
 
 Dashboard:
 
 ```bash
-tailbus -socket /tmp/pairsolver-orchestrator.sock dashboard
+./run.sh dashboard
 ```
 
 Logs:
 
 ```bash
-bash run.sh logs
+./run.sh logs
 ```
 
 Stop:
 
 ```bash
-bash run.sh stop
+./run.sh stop
+./run.sh clean
 ```
 
 ## Environment
@@ -63,6 +88,12 @@ bash run.sh stop
 ## Current tradeoff
 
 Rooms provide shared state and replay. The orchestrator still decides whose turn it is. That is intentional: rooms solve conversation state, not coordination policy.
+
+## Output
+
+Generated markdown and related run output are written under:
+
+- `examples/pair-solver/output/`
 
 ## What to expect in the dashboard
 

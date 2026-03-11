@@ -4,6 +4,15 @@ Three specialized code reviewers (security, performance, style) analyze code
 **simultaneously** in a single Tailbus room. The orchestrator fans out all
 reviews in parallel, collects results, and writes a combined report.
 
+Best for: seeing parallel specialist work in one shared room.
+
+## Why this example matters
+
+This is the clearest demo of parallel specialist work in Tailbus. It shows
+that one orchestrator can open a room, fan out work to multiple reviewers at
+once, and collect distinct judgments without collapsing everything into a
+single serial chain.
+
 ## What it demonstrates
 
 - **Parallel fan-out**: 3 review requests dispatched simultaneously via `asyncio.gather`
@@ -22,8 +31,16 @@ reviews in parallel, collects results, and writes a combined report.
 ```bash
 make build
 cd examples/parallel-review
+./run.sh doctor
 ./run.sh demo          # start → fire insecure-api → stop (fully unattended)
 ```
+
+## What to watch for
+
+- all three reviewers becoming active at once
+- capability discovery selecting reviewers by role
+- parallel room traffic rather than one-by-one orchestration
+- the combined report landing after three independent review passes
 
 ## Manual run
 
@@ -32,6 +49,7 @@ cd examples/parallel-review
 ./run.sh dashboard     # (in another terminal) watch the TUI
 ./run.sh fire insecure-api
 ./run.sh stop
+./run.sh clean
 ```
 
 ## Scenarios
@@ -52,3 +70,9 @@ style-node ───── style-reviewer      (review.style)
 ```
 
 All reviewers use a single `reviewer.py` configured via environment variables.
+
+## Output
+
+Combined reports and generated example output are written under:
+
+- `examples/parallel-review/output/`

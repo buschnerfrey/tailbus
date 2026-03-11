@@ -130,6 +130,10 @@ doctor() {
         good "$tool found"
     done
 
+    if [ "${VARIANT}" = "deterministic" ]; then
+        good "deterministic mode selected — no external LLM dependency required"
+    fi
+
     if [ "${VARIANT}" = "llm" ]; then
         if command -v codex >/dev/null 2>&1; then
             good "codex found"
@@ -152,6 +156,12 @@ doctor() {
         fi
     fi
 
+    echo ""
+    if [ "${VARIANT}" = "deterministic" ]; then
+        echo -e "  ${DIM}Next:${RESET} ./run.sh && ./run.sh fire checkout"
+    else
+        echo -e "  ${DIM}Next:${RESET} ./run-llm.sh && ./run.sh fire checkout"
+    fi
     echo ""
     return 0
 }
@@ -247,6 +257,17 @@ stop_all() {
         "${GO_TMPDIR}/tailbusd-finance-node.coord-fp" \
         "${GO_TMPDIR}/tailbusd-comms-node.coord-fp"
     good "stopped"
+}
+
+clean_all() {
+    stop_all 2>/dev/null || true
+    rm -rf "${COORD_DATA}" "${LOG_DIR}" "${SCRIPT_DIR}/output"
+    rm -rf \
+        "${GO_TMPDIR}/tailbusd-support-node" \
+        "${GO_TMPDIR}/tailbusd-ops-node" \
+        "${GO_TMPDIR}/tailbusd-finance-node" \
+        "${GO_TMPDIR}/tailbusd-comms-node"
+    good "cleaned logs, transcripts, and persisted state"
 }
 
 fire_incident() {
@@ -413,6 +434,9 @@ case "${1:-start}" in
     stop)
         stop_all
         ;;
+    clean)
+        clean_all
+        ;;
     doctor)
         doctor
         ;;
@@ -434,7 +458,7 @@ case "${1:-start}" in
         start_all
         ;;
     *)
-        echo "Usage: ./run.sh [start|stop|doctor|dashboard|scenarios|fire|logs]"
+        echo "Usage: ./run.sh [start|stop|clean|doctor|dashboard|scenarios|fire|logs]"
         exit 1
         ;;
 esac
