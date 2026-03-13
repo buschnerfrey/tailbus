@@ -29,6 +29,8 @@ from dev_task_common import (
     build_room_state,
     implementation_count,
     is_room_closed_error,
+    load_change_set,
+    load_workspace_context,
     latest_successful_implementation,
     parse_json,
     parse_json_object,
@@ -38,6 +40,7 @@ from dev_task_common import (
     review_for_iteration,
     run_codex_json,
     say,
+    store_change_set,
     tmp_json_path,
 )
 
@@ -173,7 +176,7 @@ def choose_next_action(room_state: dict[str, object]) -> dict[str, object] | Non
                     "iteration": next_impl,
                     "reason": "revision",
                     "review": review,
-                    "previous_change_set": latest.get("change_set", {}),
+                    "previous_change_set": latest,
                 }
         return {
             "type": "final",
@@ -187,7 +190,7 @@ def choose_next_action(room_state: dict[str, object]) -> dict[str, object] | Non
         return {
             "type": "apply",
             "iteration": current_iteration,
-            "change_set": latest.get("change_set", {}),
+            "change_set": latest,
         }
     if apply_result is None:
         return None
@@ -214,7 +217,7 @@ def choose_next_action(room_state: dict[str, object]) -> dict[str, object] | Non
                 "type": "implement",
                 "iteration": next_impl,
                 "reason": "repair",
-                "previous_change_set": latest.get("change_set", {}),
+                "previous_change_set": latest,
                 "failing_apply": apply_result,
             }
     return {
@@ -334,7 +337,7 @@ async def run_implementation(
                     "status": "ok",
                     "capability": "dev.implement",
                     "summary": str(change_set.get("summary", "Prepared change set.")),
-                    "change_set": change_set,
+                    **store_change_set(task_id, turn_id, change_set),
                     "elapsed_sec": elapsed,
                 }
         await post_room(room_id, reply)
@@ -377,7 +380,7 @@ async def request_apply(room_id: str, task: dict[str, object], iteration: int, c
             "target_handle": "workspace-agent",
             "target_capability": "dev.workspace.apply",
             "instruction": "Apply the approved change set inside the bounded workspace and run the fixture tests.",
-            "change_set": change_set,
+            **store_change_set(task_id, turn_id, change_set),
         },
     )
     say(agent.handle, f"{GREEN}requested{RESET} apply for iteration {iteration}")
@@ -408,7 +411,7 @@ async def drive_room(room_id: str) -> None:
             events = await replay_room_with_retry(agent, room_id)
             room_state = build_room_state(events)
             task = dict(room_state.get("task", {}))
-            workspace = dict(room_state.get("workspace_prepare") or {})
+            workspace = load_workspace_context(dict(room_state.get("workspace_prepare") or {}))
             action = choose_next_action(room_state)
             if not action or not task:
                 return
@@ -426,7 +429,7 @@ async def drive_room(room_id: str) -> None:
                         iteration=int(action["iteration"]),
                         reason=str(action["reason"]),
                         review=dict(action.get("review", {})) if action.get("review") else None,
-                        previous_change_set=dict(action.get("previous_change_set", {})) if action.get("previous_change_set") else None,
+                        previous_change_set=load_change_set(dict(action.get("previous_change_set", {}))) if action.get("previous_change_set") else None,
                         failing_apply=dict(action.get("failing_apply", {})) if action.get("failing_apply") else None,
                     )
                 except Exception:
@@ -439,7 +442,7 @@ async def drive_room(room_id: str) -> None:
                     return
                 handled_actions.add(key)
                 try:
-                    await request_apply(room_id, task, int(action["iteration"]), dict(action.get("change_set", {})))
+                    await request_apply(room_id, task, int(action["iteration"]), load_change_set(dict(action.get("change_set", {}))))
                 except Exception:
                     handled_actions.discard(key)
                     raise

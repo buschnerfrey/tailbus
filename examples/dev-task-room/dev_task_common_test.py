@@ -5,20 +5,24 @@ from __future__ import annotations
 
 import io
 import sys
+import tempfile
 import urllib.error
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import dev_task_common
 from dev_task_common import (
     build_room_state,
     build_review_units,
     collect_streamed_llm_text,
     format_llm_http_error,
     is_context_limit_error,
+    load_change_set,
     select_workspace_snapshot_files,
     split_review_unit,
+    store_change_set,
     strip_code_fences,
     truncate_preserving_ends,
 )
@@ -126,6 +130,27 @@ class DevTaskCommonTests(unittest.TestCase):
         self.assertEqual(len(state["plans"]), 1)
         self.assertEqual(len(state["implementations"]), 1)
         self.assertEqual(state["final_outcome"]["status"], "complete")
+
+    def test_change_set_artifact_round_trip(self) -> None:
+        original_artifacts_dir = dev_task_common.ARTIFACTS_DIR
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dev_task_common.ARTIFACTS_DIR = Path(tmp_dir)
+            try:
+                summary = store_change_set(
+                    "task-1",
+                    "implement-task-1-1",
+                    {
+                        "summary": "update client timeout",
+                        "files": [{"path": "client.py", "content": "timeout = 5\n"}],
+                        "deleted_paths": [],
+                    },
+                )
+                payload = {"change_set_artifact": summary["change_set_artifact"]}
+                loaded = load_change_set(payload)
+            finally:
+                dev_task_common.ARTIFACTS_DIR = original_artifacts_dir
+        self.assertEqual(loaded["summary"], "update client timeout")
+        self.assertEqual(loaded["files"][0]["path"], "client.py")
 
 
 if __name__ == "__main__":

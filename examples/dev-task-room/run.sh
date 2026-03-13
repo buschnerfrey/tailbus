@@ -97,6 +97,10 @@ doctor() {
         | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d.get('data',[])))" 2>/dev/null || echo 0)
     [ "$model_count" -gt 0 ] || fail "LM Studio has no models loaded — open LM Studio and load a model"
     good "LM Studio has ${model_count} model(s) loaded"
+    good "workspace root will be ${WORKSPACE_ROOT}"
+    echo ""
+    echo -e "  ${DIM}This demo requires Codex + LM Studio.${RESET}"
+    echo -e "  ${DIM}Next:${RESET} ./run.sh && ./run.sh fire client-timeout"
     echo ""
 }
 
@@ -190,6 +194,12 @@ stop_all() {
     good "stopped and cleared persisted room state"
 }
 
+clean_all() {
+    stop_all 2>/dev/null || true
+    rm -rf "${LOG_DIR}" "${OUTPUT_DIR}"
+    good "cleaned logs, transcripts, artifacts, and persisted state"
+}
+
 watch_logs() {
     if [ ! -d "$LOG_DIR" ]; then
         fail "no logs found — is the demo running?"
@@ -257,13 +267,13 @@ start_all() {
     say "starting agents..."
     TAILBUS_SOCKET="/tmp/devtaskroom-control-node.sock" OUTPUT_DIR="${OUTPUT_DIR}" python3 "${SCRIPT_DIR}/orchestrator.py" \
         > "${LOG_DIR}/agent-orchestrator.log" 2>&1 &
-    TAILBUS_SOCKET="/tmp/devtaskroom-control-node.sock" WORKSPACE_ROOT="${WORKSPACE_ROOT}" python3 "${SCRIPT_DIR}/workspace_agent.py" \
+    TAILBUS_SOCKET="/tmp/devtaskroom-control-node.sock" WORKSPACE_ROOT="${WORKSPACE_ROOT}" OUTPUT_DIR="${OUTPUT_DIR}" python3 "${SCRIPT_DIR}/workspace_agent.py" \
         > "${LOG_DIR}/agent-workspace-agent.log" 2>&1 &
-    TAILBUS_SOCKET="/tmp/devtaskroom-implement-node.sock" CODEX_MODEL="${CODEX_MODEL:-gpt-5.1-codex-mini}" python3 "${SCRIPT_DIR}/implementer.py" \
+    TAILBUS_SOCKET="/tmp/devtaskroom-implement-node.sock" CODEX_MODEL="${CODEX_MODEL:-gpt-5.1-codex-mini}" OUTPUT_DIR="${OUTPUT_DIR}" python3 "${SCRIPT_DIR}/implementer.py" \
         > "${LOG_DIR}/agent-implementer.log" 2>&1 &
-    TAILBUS_SOCKET="/tmp/devtaskroom-review-node.sock" LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" python3 "${SCRIPT_DIR}/critic.py" \
+    TAILBUS_SOCKET="/tmp/devtaskroom-review-node.sock" LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" OUTPUT_DIR="${OUTPUT_DIR}" python3 "${SCRIPT_DIR}/critic.py" \
         > "${LOG_DIR}/agent-critic.log" 2>&1 &
-    TAILBUS_SOCKET="/tmp/devtaskroom-test-node.sock" LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" python3 "${SCRIPT_DIR}/test_strategist.py" \
+    TAILBUS_SOCKET="/tmp/devtaskroom-test-node.sock" LLM_BASE_URL="$(llm_base_url)" LLM_MODEL="${LLM_MODEL:-}" OUTPUT_DIR="${OUTPUT_DIR}" python3 "${SCRIPT_DIR}/test_strategist.py" \
         > "${LOG_DIR}/agent-test-strategist.log" 2>&1 &
 
     sleep 2
@@ -303,6 +313,7 @@ fire_scenario() {
 case "${1:-start}" in
     start) start_all ;;
     stop) stop_all ;;
+    clean) clean_all ;;
     logs) watch_logs ;;
     doctor) doctor ;;
     dashboard) launch_dashboard ;;
@@ -330,7 +341,7 @@ case "${1:-start}" in
         ;;
     *)
         cat <<EOF
-Usage: ./run.sh [start|stop|logs|doctor|dashboard|scenarios|fire|fire-task|demo]
+Usage: ./run.sh [start|stop|clean|logs|doctor|dashboard|scenarios|fire|fire-task|demo]
 EOF
         exit 1
         ;;

@@ -26,11 +26,10 @@ from dev_task_common import (
     ensure_workspace_exists,
     is_room_closed_error,
     iter_workspace_files,
+    load_change_set,
     parse_json,
-    read_workspace_file_map,
-    read_workspace_snapshot,
-    reset_workspace,
     say,
+    store_workspace_context,
 )
 
 WORKSPACE_TIMEOUT = int(os.environ.get("WORKSPACE_TIMEOUT", "60"))
@@ -127,10 +126,8 @@ async def run_fixture_tests() -> dict[str, Any]:
     }
 
 
-def prepare_workspace_reply(turn_id: str) -> dict[str, Any]:
-    files = reset_workspace()
-    workspace_file_map = read_workspace_file_map()
-    snapshot = read_workspace_snapshot()
+def prepare_workspace_reply(turn_id: str, task_id: str) -> dict[str, Any]:
+    workspace_context = store_workspace_context(task_id, turn_id)
     return {
         "kind": "workspace_prepare_reply",
         "turn_id": turn_id,
@@ -139,9 +136,7 @@ def prepare_workspace_reply(turn_id: str) -> dict[str, Any]:
         "capability": "dev.workspace.apply",
         "summary": "Workspace reset from template.",
         "workspace_root": str(WORKSPACE_ROOT),
-        "workspace_files": files,
-        "workspace_file_map": workspace_file_map,
-        "workspace_snapshot": snapshot,
+        **workspace_context,
     }
 
 
@@ -192,14 +187,14 @@ async def handle(msg: RoomEvent) -> None:
     started = time.monotonic()
     try:
         if kind in ("task_opened", "workspace_prepare_request"):
-            reply = prepare_workspace_reply(turn_id)
+            reply = prepare_workspace_reply(turn_id, str(payload.get("task_id", "")))
             if payload.get("task_id"):
                 reply["task_id"] = payload.get("task_id")
         else:
             reply = await apply_workspace_reply(
                 turn_id,
                 int(payload.get("iteration", 0) or 0),
-                dict(payload.get("change_set", {})),
+                load_change_set(payload),
             )
             if payload.get("task_id"):
                 reply["task_id"] = payload.get("task_id")

@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -34,11 +35,14 @@ REVIEW_SECTION_OVERLAP_LINES = int(os.environ.get("REVIEW_SECTION_OVERLAP_LINES"
 CODEX_TIMEOUT = int(os.environ.get("CODEX_TIMEOUT", "600"))
 CODEX_MODEL = os.environ.get("CODEX_MODEL", "gpt-5.1-codex-mini")
 MAX_SNAPSHOT_CHARS = int(os.environ.get("DEV_TASK_ROOM_SNAPSHOT_CHARS", "24000"))
+ROOM_SNAPSHOT_PREVIEW_CHARS = int(os.environ.get("DEV_TASK_ROOM_SNAPSHOT_PREVIEW_CHARS", "8000"))
 TURN_PROGRESS_INTERVAL = float(os.environ.get("DEV_TASK_ROOM_PROGRESS_INTERVAL", "4"))
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", Path(__file__).resolve().parent / "workspace"))
 WORKSPACE_TEMPLATE = Path(
     os.environ.get("WORKSPACE_TEMPLATE", Path(__file__).resolve().parent / "workspace-template")
 )
+OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", Path(__file__).resolve().parent / "output"))
+ARTIFACTS_DIR = OUTPUT_DIR / "artifacts"
 MAX_AUTONOMOUS_REVISIONS = int(os.environ.get("DEV_TASK_ROOM_MAX_REVISIONS", "2"))
 MAX_REPAIR_ATTEMPTS = int(os.environ.get("DEV_TASK_ROOM_MAX_REPAIRS", "1"))
 DEBUG_ENABLED = os.environ.get("DEV_TASK_ROOM_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -177,6 +181,121 @@ def select_workspace_snapshot_files(files: tuple[str, ...]) -> tuple[str, ...]:
         seen.add(rel_path)
 
     return tuple(selected)
+
+
+def _safe_artifact_token(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+    return cleaned.strip(".-") or "artifact"
+
+
+def write_text_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _artifact_base_dir(task_id: str) -> Path:
+    return ARTIFACTS_DIR / _safe_artifact_token(task_id or "room")
+
+
+def write_json_artifact(task_id: str, group: str, name: str, payload: dict[str, Any]) -> str:
+    path = _artifact_base_dir(task_id) / _safe_artifact_token(group) / f"{_safe_artifact_token(name)}.json"
+    write_text_atomic(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return str(path)
+
+
+def read_json_artifact(path_str: str) -> dict[str, Any]:
+    path = Path(path_str).resolve()
+    artifacts_root = ARTIFACTS_DIR.resolve()
+    if path != artifacts_root and artifacts_root not in path.parents:
+        raise ValueError(f"artifact path escapes artifact root: {path_str}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"artifact is not a JSON object: {path_str}")
+    return payload
+
+
+def summarize_change_set(change_set: dict[str, Any]) -> dict[str, Any]:
+    files = list(change_set.get("files", []))
+    deleted_paths = [str(path).strip() for path in change_set.get("deleted_paths", []) if str(path).strip()]
+    file_entries: list[dict[str, Any]] = []
+    total_chars = 0
+    for item in files:
+        path = str(item.get("path", "")).strip()
+        content = str(item.get("content", ""))
+        if not path:
+            continue
+        total_chars += len(content)
+        file_entries.append(
+            {
+                "path": path,
+                "chars": len(content),
+                "lines": len(content.splitlines()),
+            }
+        )
+    return {
+        "summary": str(change_set.get("summary", "")),
+        "assumptions": [str(item) for item in change_set.get("assumptions", [])],
+        "test_notes": [str(item) for item in change_set.get("test_notes", [])],
+        "files": file_entries,
+        "deleted_paths": deleted_paths,
+        "file_count": len(file_entries),
+        "approx_total_chars": total_chars,
+    }
+
+
+def store_workspace_context(task_id: str, turn_id: str) -> dict[str, Any]:
+    files = reset_workspace()
+    workspace_file_map = read_workspace_file_map()
+    snapshot = read_workspace_snapshot()
+    artifact_path = write_json_artifact(
+        task_id,
+        "workspace",
+        turn_id,
+        {
+            "workspace_files": files,
+            "workspace_file_map": workspace_file_map,
+            "workspace_snapshot": snapshot,
+        },
+    )
+    return {
+        "workspace_files": files,
+        "workspace_snapshot": truncate_preserving_ends(snapshot, ROOM_SNAPSHOT_PREVIEW_CHARS),
+        "workspace_artifact": artifact_path,
+        "workspace_snapshot_chars": len(snapshot),
+    }
+
+
+def load_workspace_context(payload: dict[str, Any]) -> dict[str, Any]:
+    context = dict(payload)
+    artifact_path = str(payload.get("workspace_artifact", "")).strip()
+    if artifact_path:
+        artifact = read_json_artifact(artifact_path)
+        context["workspace_files"] = list(artifact.get("workspace_files", context.get("workspace_files", [])))
+        context["workspace_file_map"] = dict(artifact.get("workspace_file_map", {}))
+        context["workspace_snapshot"] = str(artifact.get("workspace_snapshot", context.get("workspace_snapshot", "")))
+    else:
+        context["workspace_file_map"] = dict(payload.get("workspace_file_map", {}))
+        context["workspace_snapshot"] = str(payload.get("workspace_snapshot", ""))
+    return context
+
+
+def store_change_set(task_id: str, turn_id: str, change_set: dict[str, Any]) -> dict[str, Any]:
+    artifact_path = write_json_artifact(task_id, "changesets", turn_id, change_set)
+    summary = summarize_change_set(change_set)
+    summary["change_set_artifact"] = artifact_path
+    return summary
+
+
+def load_change_set(payload: dict[str, Any]) -> dict[str, Any]:
+    change_set = payload.get("change_set")
+    if isinstance(change_set, dict):
+        return dict(change_set)
+    artifact_path = str(payload.get("change_set_artifact", "")).strip()
+    if artifact_path:
+        return read_json_artifact(artifact_path)
+    return {}
 
 
 def room_task_from_events(events: list[RoomEvent]) -> dict[str, Any]:

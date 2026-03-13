@@ -26,6 +26,8 @@ from dev_task_common import (
     is_context_limit_error,
     is_room_closed_error,
     llm_call,
+    load_change_set,
+    load_workspace_context,
     parse_json,
     parse_json_object,
     progress_pinger,
@@ -289,6 +291,7 @@ async def request_test_plan(room_id: str, task: dict[str, object], implementatio
     task_id = str(task.get("task_id", ""))
     iteration = int(implementation.get("iteration", 0) or 0)
     turn_id = f"test-plan:{task_id}:{iteration}"
+    change_set = load_change_set(implementation)
     await post_room(
         room_id,
         {
@@ -314,8 +317,8 @@ async def request_test_plan(room_id: str, task: dict[str, object], implementatio
             "target_capability": "dev.test.plan",
             "task": task.get("task", ""),
             "implement_summary": implementation.get("summary", ""),
-            "change_paths": change_set_paths(dict(implementation.get("change_set", {}))),
-            "change_set": implementation.get("change_set", {}),
+            "change_paths": change_set_paths(change_set),
+            "change_set_artifact": implementation.get("change_set_artifact", ""),
         },
     )
     reply, _ = await wait_for_room_message(
@@ -359,9 +362,10 @@ async def review_iteration(room_id: str, task: dict[str, object], workspace: dic
     )
     try:
         test_plan = await request_test_plan(room_id, task, implementation)
-        change_set = dict(implementation.get("change_set", {}))
+        change_set = load_change_set(implementation)
+        workspace_context = load_workspace_context(workspace)
         workspace_file_map = {
-            str(path): str(content) for path, content in dict(workspace.get("workspace_file_map", {})).items()
+            str(path): str(content) for path, content in dict(workspace_context.get("workspace_file_map", {})).items()
         }
         units = build_review_units(change_set, workspace_file_map)
         if not units:

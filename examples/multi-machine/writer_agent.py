@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Writer agent — produces polished final output from research + critique.
-
-Receives research findings and critique, synthesizes them into a clear,
-well-structured final document.
-"""
+"""Writer agent for the multi-machine example."""
 
 import asyncio
 import json
@@ -19,17 +15,9 @@ from tailbus import AsyncAgent, Manifest, Message
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://host.docker.internal:1234/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 
-SYSTEM_PROMPT = """You are a professional writer. You take research findings and critical feedback,
-then produce a clear, polished final document.
+SYSTEM_PROMPT = """You are a professional writer. Turn research findings and critique into a polished final document.
 
-Your output should:
-- Incorporate the strongest findings
-- Address the critique's valid concerns
-- Be well-structured with clear sections
-- Be concise but comprehensive
-- End with actionable conclusions
-
-Write in a professional but accessible tone. Do NOT include any thinking/reasoning process — just provide the final document directly."""
+Your output should be clear, concise, and actionable. Do not include hidden reasoning."""
 
 agent = AsyncAgent(
     "writer",
@@ -60,8 +48,8 @@ def llm_call(messages: list[dict]) -> str:
                 parts = content.split("</think>")
                 content = parts[-1].strip() if len(parts) > 1 else content
             return content
-    except Exception as e:
-        return f"[LLM error] {e}"
+    except Exception as exc:
+        return f"[LLM error] {exc}"
 
 
 @agent.on_message
@@ -78,19 +66,22 @@ async def handle(msg: Message):
 
     print(f"[writer] writing final output on: {topic}", flush=True)
 
-    prompt = f"Topic: {topic}\n\n"
-    prompt += f"Research findings:\n{findings}\n\n"
+    prompt = f"Topic: {topic}\n\nResearch findings:\n{findings}\n\n"
     if critique:
         prompt += f"Critical review (address these concerns):\n{critique}\n\n"
     prompt += "Write the final polished document."
 
     loop = asyncio.get_running_loop()
-    output = await loop.run_in_executor(None, llm_call, [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ])
+    output = await loop.run_in_executor(
+        None,
+        llm_call,
+        [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+    )
 
-    print(f"[writer] final document ready", flush=True)
+    print("[writer] final document ready", flush=True)
     await agent.resolve(msg.session, output)
 
 

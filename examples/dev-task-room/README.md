@@ -2,6 +2,15 @@
 
 `dev-task-room` is the Tailbus engineering war-room demo.
 
+Best for: the clearest room-based agentic workflow with a local safety boundary.
+
+## Why this example matters
+
+This is the strongest example of Tailbus rooms as a coordination surface rather
+than a transport detail. The workflow is legible because agents discover each
+other by capability, deliberate in the room, and still respect a strict local
+write boundary.
+
 It uses:
 - a Codex-backed `implementer` that leads the task
 - an LM Studio-backed `critic` that reviews and can block unsafe changes
@@ -11,19 +20,18 @@ It uses:
 
 The user sends a task. Tailbus discovers the collaborators by capability, the workspace agent materializes the bounded fixture workspace, the implementer proposes a plan and a whole-file change set, the critic recruits the test strategist, and the room converges on either an approved apply or a bounded failure outcome.
 
-## Why this example matters
-
-This is the clearest Tailbus room demo in the repo:
-- different agents on different nodes
-- different model backends for different roles
-- one replayable room transcript instead of stitched point-to-point prompts
-- capability discovery instead of hardcoded collaborator names
-- visible agent initiative: delegation, review, test planning, repair
-- a strict local safety boundary around filesystem writes
-
 Remote agents never write directly to your filesystem. They propose work in the room. The local `workspace-agent` applies approved changes under `/tmp/devtaskroom-workspace`.
+Large workspace snapshots and change sets are stored as local artifacts under `examples/dev-task-room/output/artifacts/`; the room transcript keeps compact references so replay stays fast.
 
-## Quickstart
+## Requirements
+
+- `tailbus`, `tailbusd`, `tailbus-coord` built into the repo `bin/` directory
+- `python3`
+- `curl`
+- `codex` CLI on `PATH`
+- LM Studio running at `http://localhost:1234/v1` unless `LLM_BASE_URL` is set
+
+## Quick start
 
 From the repo root:
 
@@ -59,9 +67,11 @@ Useful commands:
 ```bash
 ./run.sh logs
 ./run.sh stop
+./run.sh clean
 ```
 
 `./run.sh stop` also clears the demo's persisted coord and daemon room state, so the next start comes up with an empty `ROOMS` list.
+`./run.sh clean` additionally removes transcripts, artifacts, and logs.
 
 ## What to watch for
 
@@ -74,14 +84,6 @@ In the dashboard and transcript you should see:
 - a `final_outcome` event that closes the loop
 
 The point is not just that agents can talk. The point is that the room makes their decisions legible.
-
-## Requirements
-
-- `tailbus`, `tailbusd`, `tailbus-coord` built into the repo `bin/` directory
-- `python3`
-- `curl`
-- `codex` CLI on `PATH`
-- LM Studio running at `http://localhost:1234/v1` unless `LLM_BASE_URL` is set
 
 Optional env vars:
 
@@ -127,6 +129,10 @@ The orchestrator writes a markdown transcript to:
 It also persists live task state snapshots to:
 
 - `examples/dev-task-room/output/state/`
+
+Large per-task workspace snapshots and change-set artifacts are stored in:
+
+- `examples/dev-task-room/output/artifacts/`
 
 The markdown output includes:
 - discovered collaborators

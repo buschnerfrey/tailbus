@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Critic agent — reviews research findings and provides constructive feedback.
-
-Receives findings from the researcher, evaluates them for accuracy, completeness,
-and bias, then returns structured critique.
-"""
+"""Critic agent for the multi-machine example."""
 
 import asyncio
 import json
@@ -19,18 +15,13 @@ from tailbus import AsyncAgent, Manifest, Message
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://host.docker.internal:1234/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "")
 
-SYSTEM_PROMPT = """You are a critical reviewer. Your job is to evaluate research findings for:
-- Accuracy: Are the claims supported? Any factual errors?
-- Completeness: What's missing? What angles weren't covered?
-- Bias: Is the analysis balanced? Any unsupported assumptions?
-- Actionability: Are the findings useful? What would make them more practical?
+SYSTEM_PROMPT = """You are a critical reviewer. Evaluate research findings for:
+- Accuracy
+- Completeness
+- Bias
+- Actionability
 
-Provide a structured critique with:
-1. Strengths (what's good)
-2. Weaknesses (what needs improvement)
-3. Suggestions (specific improvements)
-
-Be constructive and specific. Do NOT include any thinking/reasoning process — just provide the critique directly."""
+Provide strengths, weaknesses, and concrete suggestions. Do not include hidden reasoning."""
 
 agent = AsyncAgent(
     "critic",
@@ -61,8 +52,8 @@ def llm_call(messages: list[dict]) -> str:
                 parts = content.split("</think>")
                 content = parts[-1].strip() if len(parts) > 1 else content
             return content
-    except Exception as e:
-        return f"[LLM error] {e}"
+    except Exception as exc:
+        return f"[LLM error] {exc}"
 
 
 @agent.on_message
@@ -78,12 +69,16 @@ async def handle(msg: Message):
     print(f"[critic] reviewing findings on: {topic}", flush=True)
 
     loop = asyncio.get_running_loop()
-    critique = await loop.run_in_executor(None, llm_call, [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Topic: {topic}\n\nResearch findings to review:\n\n{findings}"},
-    ])
+    critique = await loop.run_in_executor(
+        None,
+        llm_call,
+        [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Topic: {topic}\n\nResearch findings to review:\n\n{findings}"},
+        ],
+    )
 
-    print(f"[critic] critique ready", flush=True)
+    print("[critic] critique ready", flush=True)
     await agent.resolve(msg.session, critique)
 
 

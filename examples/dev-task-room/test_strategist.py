@@ -18,6 +18,7 @@ from dev_task_common import (
     BOLD,
     GREEN,
     LLM_BASE_URL,
+    load_change_set,
     RESET,
     REVIEW_TIMEOUT,
     TURN_PROGRESS_INTERVAL,
@@ -68,6 +69,7 @@ MAX_SEEN_TURNS = 500
 
 
 def build_prompt(payload: dict[str, object]) -> str:
+    change_set = load_change_set(payload)
     parts = [
         "Task:",
         str(payload.get("task", "")),
@@ -77,7 +79,7 @@ def build_prompt(payload: dict[str, object]) -> str:
         f"Changed paths: {json.dumps(payload.get('change_paths', []))}",
         "",
         "Proposed change set:",
-        json.dumps(payload.get("change_set", {}), indent=2),
+        json.dumps(change_set, indent=2),
     ]
     findings = payload.get("review_findings", [])
     if findings:

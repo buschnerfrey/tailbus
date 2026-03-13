@@ -1,7 +1,0 @@
-# Machine A: runs coord + daemon with the "concierge" orchestrator agent
-node_id = "machine-a"
-coord_addr = "__COORD_IP__:8443"
-advertise_addr = "__MY_IP__:9443"
-listen_addr = ":9443"
-socket_path = "/tmp/tailbusd.sock"
-key_file = "/tmp/tailbusd-a.key"

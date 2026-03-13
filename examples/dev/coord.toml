@@ -1,6 +1,0 @@
-listen_addr = ":8443"
-data_dir = "/tmp/tailbus-coord"
-
-# Admission control: uncomment to require auth tokens for node registration.
-# When set, nodes must pass -auth-token with one of these values to join.
-# auth_tokens = ["changeme"]

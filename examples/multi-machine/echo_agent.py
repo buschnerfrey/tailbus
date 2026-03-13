@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Echo agent — simple agent that echoes messages back.
-
-Demonstrates the simplest possible agent: registers a handle,
-receives messages, and responds with the same payload.
-"""
+"""Echo agent for the multi-machine example."""
 
 import asyncio
 import os
@@ -12,7 +8,6 @@ import sys
 sys.path.insert(0, "/sdk/python/src")
 
 from tailbus import AsyncAgent, Manifest, Message
-
 
 agent = AsyncAgent(
     "echo",
@@ -27,9 +22,7 @@ agent = AsyncAgent(
 
 @agent.on_message
 async def handle(msg: Message):
-    """Echo the payload back and resolve the session."""
-    response = f"Echo from {agent.handle}: {msg.payload}"
-    await agent.resolve(msg.session, response)
+    await agent.resolve(msg.session, f"Echo from {agent.handle}: {msg.payload}")
 
 
 async def main():

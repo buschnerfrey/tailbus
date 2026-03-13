@@ -3,6 +3,50 @@
 Run the tailbus mesh across multiple physical machines. Agents on different
 machines communicate through the mesh — the relay handles NAT traversal.
 
+This example is self-contained in `examples/multi-machine/`; it no longer
+depends on agent code from other example directories.
+
+Best for: proving the mesh across real machines. Worst for quick onboarding.
+
+## Why this example matters
+
+This is the example that proves Tailbus beyond one laptop. It is not the first
+demo to run, but it is the right one when you need to validate discovery and
+agent traffic across real machines and real network boundaries.
+
+## Requirements
+
+- Docker and `docker compose` on both machines
+- the repo cloned on both machines
+- Machine A reachable from Machine B
+- LM Studio on Machine A if you want the LLM-backed writer/researcher flow
+
+## Quick start
+
+On Machine A:
+
+```bash
+cd examples/multi-machine
+export HOST_IP=192.168.1.100
+docker compose -f machine-a.yml up --build
+```
+
+On Machine B:
+
+```bash
+cd examples/multi-machine
+export COORD_IP=192.168.1.100
+export HOST_IP=192.168.1.101
+docker compose -f machine-b.yml up --build
+```
+
+## What to watch for
+
+- agents from both machines appearing in the Machine A web UI
+- researcher/critic staying local to Machine A while writer runs on Machine B
+- direct P2P traffic when available, with relay fallback when it is not
+- one logical workflow spanning two physical hosts
+
 ## Architecture
 
 ```
@@ -90,6 +134,12 @@ curl -s http://192.168.1.100:8080/api/agents | python3 -m json.tool
 
 # Should list agents from both machines
 ```
+
+## Output and logs
+
+- Machine A web UI: `http://<HOST_IP>:8080`
+- Machine A logs: `docker compose -f machine-a.yml logs -f researcher critic`
+- Machine B logs: `docker compose -f machine-b.yml logs -f writer echo`
 
 ## Firewall notes
 

@@ -20,3 +20,10 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Frontend/build artifacts
+.next/
+
+# Example runtime artifacts
+examples/*/output/
+examples/dev-task-room/workspace/

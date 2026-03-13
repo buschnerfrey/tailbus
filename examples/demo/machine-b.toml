@@ -1,7 +1,0 @@
-# Machine B: runs daemon with "flights" and "hotels" booking agents
-node_id = "machine-b"
-coord_addr = "__COORD_IP__:8443"
-advertise_addr = "__MY_IP__:9443"
-listen_addr = ":9443"
-socket_path = "/tmp/tailbusd.sock"
-key_file = "/tmp/tailbusd-b.key"

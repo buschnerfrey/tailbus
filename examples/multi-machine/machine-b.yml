@@ -24,7 +24,7 @@ services:
       - daemon-data:/data
       - daemon-sock:/var/run/tailbus
       - ../../sdk:/sdk:ro
-      - ../multi-agent:/agents:ro
+      - .:/agents:ro
     command:
       - -node-id
       - machine-b
@@ -54,7 +54,7 @@ services:
     volumes:
       - daemon-sock:/var/run/tailbus
       - ../../sdk:/sdk:ro
-      - ../multi-agent:/agents:ro
+      - .:/agents:ro
     depends_on:
       daemon:
         condition: service_healthy
@@ -72,7 +72,7 @@ services:
     volumes:
       - daemon-sock:/var/run/tailbus
       - ../../sdk:/sdk:ro
-      - ../docker:/agents:ro
+      - .:/agents:ro
     depends_on:
       daemon:
         condition: service_healthy

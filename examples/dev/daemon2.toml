@@ -1,6 +1,0 @@
-node_id = "node-2"
-coord_addr = "127.0.0.1:8443"
-advertise_addr = "127.0.0.1:9444"
-listen_addr = ":9444"
-socket_path = "/tmp/tailbusd-2.sock"
-key_file = "/tmp/tailbusd-node2.key"
