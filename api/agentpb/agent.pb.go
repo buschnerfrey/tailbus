@@ -23,6 +23,61 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type UsageMetric int32
+
+const (
+	UsageMetric_USAGE_METRIC_UNSPECIFIED          UsageMetric = 0
+	UsageMetric_USAGE_METRIC_MESSAGES_ROUTED      UsageMetric = 1
+	UsageMetric_USAGE_METRIC_SESSIONS_OPENED      UsageMetric = 2
+	UsageMetric_USAGE_METRIC_ROOM_MESSAGES_POSTED UsageMetric = 3
+	UsageMetric_USAGE_METRIC_ROOMS_CREATED        UsageMetric = 4
+)
+
+// Enum value maps for UsageMetric.
+var (
+	UsageMetric_name = map[int32]string{
+		0: "USAGE_METRIC_UNSPECIFIED",
+		1: "USAGE_METRIC_MESSAGES_ROUTED",
+		2: "USAGE_METRIC_SESSIONS_OPENED",
+		3: "USAGE_METRIC_ROOM_MESSAGES_POSTED",
+		4: "USAGE_METRIC_ROOMS_CREATED",
+	}
+	UsageMetric_value = map[string]int32{
+		"USAGE_METRIC_UNSPECIFIED":          0,
+		"USAGE_METRIC_MESSAGES_ROUTED":      1,
+		"USAGE_METRIC_SESSIONS_OPENED":      2,
+		"USAGE_METRIC_ROOM_MESSAGES_POSTED": 3,
+		"USAGE_METRIC_ROOMS_CREATED":        4,
+	}
+)
+
+func (x UsageMetric) Enum() *UsageMetric {
+	p := new(UsageMetric)
+	*p = x
+	return p
+}
+
+func (x UsageMetric) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (UsageMetric) Descriptor() protoreflect.EnumDescriptor {
+	return file_tailbus_v1_agent_proto_enumTypes[0].Descriptor()
+}
+
+func (UsageMetric) Type() protoreflect.EnumType {
+	return &file_tailbus_v1_agent_proto_enumTypes[0]
+}
+
+func (x UsageMetric) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use UsageMetric.Descriptor instead.
+func (UsageMetric) EnumDescriptor() ([]byte, []int) {
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{0}
+}
+
 type TraceAction int32
 
 const (
@@ -68,11 +123,11 @@ func (x TraceAction) String() string {
 }
 
 func (TraceAction) Descriptor() protoreflect.EnumDescriptor {
-	return file_tailbus_v1_agent_proto_enumTypes[0].Descriptor()
+	return file_tailbus_v1_agent_proto_enumTypes[1].Descriptor()
 }
 
 func (TraceAction) Type() protoreflect.EnumType {
-	return &file_tailbus_v1_agent_proto_enumTypes[0]
+	return &file_tailbus_v1_agent_proto_enumTypes[1]
 }
 
 func (x TraceAction) Number() protoreflect.EnumNumber {
@@ -81,7 +136,7 @@ func (x TraceAction) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TraceAction.Descriptor instead.
 func (TraceAction) EnumDescriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{0}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{1}
 }
 
 type RegisterRequest struct {
@@ -2130,6 +2185,7 @@ type GetNodeStatusResponse struct {
 	Counters      *Counters              `protobuf:"bytes,6,opt,name=counters,proto3" json:"counters,omitempty"`
 	Relays        []*RelayStatus         `protobuf:"bytes,7,rep,name=relays,proto3" json:"relays,omitempty"`
 	Rooms         []*messagepb.RoomInfo  `protobuf:"bytes,8,rep,name=rooms,proto3" json:"rooms,omitempty"`
+	Usage         *UsageHistory          `protobuf:"bytes,9,opt,name=usage,proto3" json:"usage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2216,6 +2272,13 @@ func (x *GetNodeStatusResponse) GetRelays() []*RelayStatus {
 func (x *GetNodeStatusResponse) GetRooms() []*messagepb.RoomInfo {
 	if x != nil {
 		return x.Rooms
+	}
+	return nil
+}
+
+func (x *GetNodeStatusResponse) GetUsage() *UsageHistory {
+	if x != nil {
+		return x.Usage
 	}
 	return nil
 }
@@ -2582,6 +2645,162 @@ func (x *Counters) GetRoomsClosed() int64 {
 	return 0
 }
 
+type UsageBucket struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	BucketStartUnix int64                  `protobuf:"varint,1,opt,name=bucket_start_unix,json=bucketStartUnix,proto3" json:"bucket_start_unix,omitempty"`
+	Count           int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *UsageBucket) Reset() {
+	*x = UsageBucket{}
+	mi := &file_tailbus_v1_agent_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageBucket) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageBucket) ProtoMessage() {}
+
+func (x *UsageBucket) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_agent_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageBucket.ProtoReflect.Descriptor instead.
+func (*UsageBucket) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *UsageBucket) GetBucketStartUnix() int64 {
+	if x != nil {
+		return x.BucketStartUnix
+	}
+	return 0
+}
+
+func (x *UsageBucket) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+type UsageMetricHistory struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metric        UsageMetric            `protobuf:"varint,1,opt,name=metric,proto3,enum=tailbus.v1.UsageMetric" json:"metric,omitempty"`
+	Total         int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	DailyBuckets  []*UsageBucket         `protobuf:"bytes,3,rep,name=daily_buckets,json=dailyBuckets,proto3" json:"daily_buckets,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageMetricHistory) Reset() {
+	*x = UsageMetricHistory{}
+	mi := &file_tailbus_v1_agent_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageMetricHistory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageMetricHistory) ProtoMessage() {}
+
+func (x *UsageMetricHistory) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_agent_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageMetricHistory.ProtoReflect.Descriptor instead.
+func (*UsageMetricHistory) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *UsageMetricHistory) GetMetric() UsageMetric {
+	if x != nil {
+		return x.Metric
+	}
+	return UsageMetric_USAGE_METRIC_UNSPECIFIED
+}
+
+func (x *UsageMetricHistory) GetTotal() int64 {
+	if x != nil {
+		return x.Total
+	}
+	return 0
+}
+
+func (x *UsageMetricHistory) GetDailyBuckets() []*UsageBucket {
+	if x != nil {
+		return x.DailyBuckets
+	}
+	return nil
+}
+
+type UsageHistory struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metrics       []*UsageMetricHistory  `protobuf:"bytes,1,rep,name=metrics,proto3" json:"metrics,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UsageHistory) Reset() {
+	*x = UsageHistory{}
+	mi := &file_tailbus_v1_agent_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UsageHistory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UsageHistory) ProtoMessage() {}
+
+func (x *UsageHistory) ProtoReflect() protoreflect.Message {
+	mi := &file_tailbus_v1_agent_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UsageHistory.ProtoReflect.Descriptor instead.
+func (*UsageHistory) Descriptor() ([]byte, []int) {
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *UsageHistory) GetMetrics() []*UsageMetricHistory {
+	if x != nil {
+		return x.Metrics
+	}
+	return nil
+}
+
 type WatchActivityRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -2590,7 +2809,7 @@ type WatchActivityRequest struct {
 
 func (x *WatchActivityRequest) Reset() {
 	*x = WatchActivityRequest{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[43]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2602,7 +2821,7 @@ func (x *WatchActivityRequest) String() string {
 func (*WatchActivityRequest) ProtoMessage() {}
 
 func (x *WatchActivityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[43]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2615,7 +2834,7 @@ func (x *WatchActivityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchActivityRequest.ProtoReflect.Descriptor instead.
 func (*WatchActivityRequest) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{43}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{46}
 }
 
 type ActivityEvent struct {
@@ -2639,7 +2858,7 @@ type ActivityEvent struct {
 
 func (x *ActivityEvent) Reset() {
 	*x = ActivityEvent{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[44]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2651,7 +2870,7 @@ func (x *ActivityEvent) String() string {
 func (*ActivityEvent) ProtoMessage() {}
 
 func (x *ActivityEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[44]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2664,7 +2883,7 @@ func (x *ActivityEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActivityEvent.ProtoReflect.Descriptor instead.
 func (*ActivityEvent) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{44}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ActivityEvent) GetTimestamp() *timestamppb.Timestamp {
@@ -2834,7 +3053,7 @@ type MessageRoutedEvent struct {
 
 func (x *MessageRoutedEvent) Reset() {
 	*x = MessageRoutedEvent{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[45]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2846,7 +3065,7 @@ func (x *MessageRoutedEvent) String() string {
 func (*MessageRoutedEvent) ProtoMessage() {}
 
 func (x *MessageRoutedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[45]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2859,7 +3078,7 @@ func (x *MessageRoutedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessageRoutedEvent.ProtoReflect.Descriptor instead.
 func (*MessageRoutedEvent) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{45}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *MessageRoutedEvent) GetSessionId() string {
@@ -2915,7 +3134,7 @@ type SessionOpenedEvent struct {
 
 func (x *SessionOpenedEvent) Reset() {
 	*x = SessionOpenedEvent{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[46]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2927,7 +3146,7 @@ func (x *SessionOpenedEvent) String() string {
 func (*SessionOpenedEvent) ProtoMessage() {}
 
 func (x *SessionOpenedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[46]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2940,7 +3159,7 @@ func (x *SessionOpenedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionOpenedEvent.ProtoReflect.Descriptor instead.
 func (*SessionOpenedEvent) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{46}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *SessionOpenedEvent) GetSessionId() string {
@@ -2974,7 +3193,7 @@ type SessionResolvedEvent struct {
 
 func (x *SessionResolvedEvent) Reset() {
 	*x = SessionResolvedEvent{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[47]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2986,7 +3205,7 @@ func (x *SessionResolvedEvent) String() string {
 func (*SessionResolvedEvent) ProtoMessage() {}
 
 func (x *SessionResolvedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[47]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2999,7 +3218,7 @@ func (x *SessionResolvedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionResolvedEvent.ProtoReflect.Descriptor instead.
 func (*SessionResolvedEvent) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{47}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *SessionResolvedEvent) GetSessionId() string {
@@ -3025,7 +3244,7 @@ type HandleRegisteredEvent struct {
 
 func (x *HandleRegisteredEvent) Reset() {
 	*x = HandleRegisteredEvent{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[48]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3037,7 +3256,7 @@ func (x *HandleRegisteredEvent) String() string {
 func (*HandleRegisteredEvent) ProtoMessage() {}
 
 func (x *HandleRegisteredEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[48]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3050,7 +3269,7 @@ func (x *HandleRegisteredEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandleRegisteredEvent.ProtoReflect.Descriptor instead.
 func (*HandleRegisteredEvent) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{48}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *HandleRegisteredEvent) GetHandle() string {
@@ -3072,7 +3291,7 @@ type RoomCreatedEvent struct {
 
 func (x *RoomCreatedEvent) Reset() {
 	*x = RoomCreatedEvent{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[49]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3084,7 +3303,7 @@ func (x *RoomCreatedEvent) String() string {
 func (*RoomCreatedEvent) ProtoMessage() {}
 
 func (x *RoomCreatedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[49]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3097,7 +3316,7 @@ func (x *RoomCreatedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoomCreatedEvent.ProtoReflect.Descriptor instead.
 func (*RoomCreatedEvent) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{49}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *RoomCreatedEvent) GetRoomId() string {
@@ -3147,7 +3366,7 @@ type RoomMessagePostedEvent struct {
 
 func (x *RoomMessagePostedEvent) Reset() {
 	*x = RoomMessagePostedEvent{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[50]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3159,7 +3378,7 @@ func (x *RoomMessagePostedEvent) String() string {
 func (*RoomMessagePostedEvent) ProtoMessage() {}
 
 func (x *RoomMessagePostedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[50]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3172,7 +3391,7 @@ func (x *RoomMessagePostedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoomMessagePostedEvent.ProtoReflect.Descriptor instead.
 func (*RoomMessagePostedEvent) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{50}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *RoomMessagePostedEvent) GetRoomId() string {
@@ -3263,7 +3482,7 @@ type RoomMemberJoinedEvent struct {
 
 func (x *RoomMemberJoinedEvent) Reset() {
 	*x = RoomMemberJoinedEvent{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[51]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3275,7 +3494,7 @@ func (x *RoomMemberJoinedEvent) String() string {
 func (*RoomMemberJoinedEvent) ProtoMessage() {}
 
 func (x *RoomMemberJoinedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[51]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3288,7 +3507,7 @@ func (x *RoomMemberJoinedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoomMemberJoinedEvent.ProtoReflect.Descriptor instead.
 func (*RoomMemberJoinedEvent) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{51}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *RoomMemberJoinedEvent) GetRoomId() string {
@@ -3323,7 +3542,7 @@ type RoomMemberLeftEvent struct {
 
 func (x *RoomMemberLeftEvent) Reset() {
 	*x = RoomMemberLeftEvent{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[52]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3335,7 +3554,7 @@ func (x *RoomMemberLeftEvent) String() string {
 func (*RoomMemberLeftEvent) ProtoMessage() {}
 
 func (x *RoomMemberLeftEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[52]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3348,7 +3567,7 @@ func (x *RoomMemberLeftEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoomMemberLeftEvent.ProtoReflect.Descriptor instead.
 func (*RoomMemberLeftEvent) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{52}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *RoomMemberLeftEvent) GetRoomId() string {
@@ -3383,7 +3602,7 @@ type RoomClosedEvent struct {
 
 func (x *RoomClosedEvent) Reset() {
 	*x = RoomClosedEvent{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[53]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3395,7 +3614,7 @@ func (x *RoomClosedEvent) String() string {
 func (*RoomClosedEvent) ProtoMessage() {}
 
 func (x *RoomClosedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[53]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3408,7 +3627,7 @@ func (x *RoomClosedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RoomClosedEvent.ProtoReflect.Descriptor instead.
 func (*RoomClosedEvent) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{53}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *RoomClosedEvent) GetRoomId() string {
@@ -3446,7 +3665,7 @@ type TraceSpan struct {
 
 func (x *TraceSpan) Reset() {
 	*x = TraceSpan{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[54]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3458,7 +3677,7 @@ func (x *TraceSpan) String() string {
 func (*TraceSpan) ProtoMessage() {}
 
 func (x *TraceSpan) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[54]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3471,7 +3690,7 @@ func (x *TraceSpan) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TraceSpan.ProtoReflect.Descriptor instead.
 func (*TraceSpan) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{54}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *TraceSpan) GetTraceId() string {
@@ -3525,7 +3744,7 @@ type GetTraceRequest struct {
 
 func (x *GetTraceRequest) Reset() {
 	*x = GetTraceRequest{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[55]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3537,7 +3756,7 @@ func (x *GetTraceRequest) String() string {
 func (*GetTraceRequest) ProtoMessage() {}
 
 func (x *GetTraceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[55]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3550,7 +3769,7 @@ func (x *GetTraceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceRequest.ProtoReflect.Descriptor instead.
 func (*GetTraceRequest) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{55}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *GetTraceRequest) GetTraceId() string {
@@ -3569,7 +3788,7 @@ type GetTraceResponse struct {
 
 func (x *GetTraceResponse) Reset() {
 	*x = GetTraceResponse{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[56]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3581,7 +3800,7 @@ func (x *GetTraceResponse) String() string {
 func (*GetTraceResponse) ProtoMessage() {}
 
 func (x *GetTraceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[56]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3594,7 +3813,7 @@ func (x *GetTraceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetTraceResponse.ProtoReflect.Descriptor instead.
 func (*GetTraceResponse) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{56}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *GetTraceResponse) GetSpans() []*TraceSpan {
@@ -3612,7 +3831,7 @@ type ShutdownRequest struct {
 
 func (x *ShutdownRequest) Reset() {
 	*x = ShutdownRequest{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[57]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3624,7 +3843,7 @@ func (x *ShutdownRequest) String() string {
 func (*ShutdownRequest) ProtoMessage() {}
 
 func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[57]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3637,7 +3856,7 @@ func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
 func (*ShutdownRequest) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{57}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{60}
 }
 
 type ShutdownResponse struct {
@@ -3648,7 +3867,7 @@ type ShutdownResponse struct {
 
 func (x *ShutdownResponse) Reset() {
 	*x = ShutdownResponse{}
-	mi := &file_tailbus_v1_agent_proto_msgTypes[58]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3660,7 +3879,7 @@ func (x *ShutdownResponse) String() string {
 func (*ShutdownResponse) ProtoMessage() {}
 
 func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tailbus_v1_agent_proto_msgTypes[58]
+	mi := &file_tailbus_v1_agent_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3673,7 +3892,7 @@ func (x *ShutdownResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownResponse.ProtoReflect.Descriptor instead.
 func (*ShutdownResponse) Descriptor() ([]byte, []int) {
-	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{58}
+	return file_tailbus_v1_agent_proto_rawDescGZIP(), []int{61}
 }
 
 var File_tailbus_v1_agent_proto protoreflect.FileDescriptor
@@ -3815,7 +4034,7 @@ const file_tailbus_v1_agent_proto_rawDesc = "" +
 	"\x05state\x18\x04 \x01(\tR\x05state\x12&\n" +
 	"\x0fcreated_at_unix\x18\x05 \x01(\x03R\rcreatedAtUnix\x12&\n" +
 	"\x0fupdated_at_unix\x18\x06 \x01(\x03R\rupdatedAtUnix\"\x16\n" +
-	"\x14GetNodeStatusRequest\"\x8f\x03\n" +
+	"\x14GetNodeStatusRequest\"\xbf\x03\n" +
 	"\x15GetNodeStatusResponse\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x129\n" +
 	"\n" +
@@ -3825,7 +4044,8 @@ const file_tailbus_v1_agent_proto_rawDesc = "" +
 	"\bsessions\x18\x05 \x03(\v2\x17.tailbus.v1.SessionInfoR\bsessions\x120\n" +
 	"\bcounters\x18\x06 \x01(\v2\x14.tailbus.v1.CountersR\bcounters\x12/\n" +
 	"\x06relays\x18\a \x03(\v2\x17.tailbus.v1.RelayStatusR\x06relays\x12*\n" +
-	"\x05rooms\x18\b \x03(\v2\x14.tailbus.v1.RoomInfoR\x05rooms\"X\n" +
+	"\x05rooms\x18\b \x03(\v2\x14.tailbus.v1.RoomInfoR\x05rooms\x12.\n" +
+	"\x05usage\x18\t \x01(\v2\x18.tailbus.v1.UsageHistoryR\x05usage\"X\n" +
 	"\vRelayStatus\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x1c\n" +
@@ -3861,7 +4081,16 @@ const file_tailbus_v1_agent_proto_rawDesc = "" +
 	"\x13room_members_joined\x18\t \x01(\x03R\x11roomMembersJoined\x12*\n" +
 	"\x11room_members_left\x18\n" +
 	" \x01(\x03R\x0froomMembersLeft\x12!\n" +
-	"\frooms_closed\x18\v \x01(\x03R\vroomsClosed\"\x16\n" +
+	"\frooms_closed\x18\v \x01(\x03R\vroomsClosed\"O\n" +
+	"\vUsageBucket\x12*\n" +
+	"\x11bucket_start_unix\x18\x01 \x01(\x03R\x0fbucketStartUnix\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x03R\x05count\"\x99\x01\n" +
+	"\x12UsageMetricHistory\x12/\n" +
+	"\x06metric\x18\x01 \x01(\x0e2\x17.tailbus.v1.UsageMetricR\x06metric\x12\x14\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total\x12<\n" +
+	"\rdaily_buckets\x18\x03 \x03(\v2\x17.tailbus.v1.UsageBucketR\fdailyBuckets\"H\n" +
+	"\fUsageHistory\x128\n" +
+	"\ametrics\x18\x01 \x03(\v2\x1e.tailbus.v1.UsageMetricHistoryR\ametrics\"\x16\n" +
 	"\x14WatchActivityRequest\"\xfe\x05\n" +
 	"\rActivityEvent\x128\n" +
 	"\ttimestamp\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12G\n" +
@@ -3948,7 +4177,13 @@ const file_tailbus_v1_agent_proto_rawDesc = "" +
 	"\x10GetTraceResponse\x12+\n" +
 	"\x05spans\x18\x01 \x03(\v2\x15.tailbus.v1.TraceSpanR\x05spans\"\x11\n" +
 	"\x0fShutdownRequest\"\x12\n" +
-	"\x10ShutdownResponse*\x84\x02\n" +
+	"\x10ShutdownResponse*\xb6\x01\n" +
+	"\vUsageMetric\x12\x1c\n" +
+	"\x18USAGE_METRIC_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cUSAGE_METRIC_MESSAGES_ROUTED\x10\x01\x12 \n" +
+	"\x1cUSAGE_METRIC_SESSIONS_OPENED\x10\x02\x12%\n" +
+	"!USAGE_METRIC_ROOM_MESSAGES_POSTED\x10\x03\x12\x1e\n" +
+	"\x1aUSAGE_METRIC_ROOMS_CREATED\x10\x04*\x84\x02\n" +
 	"\vTraceAction\x12\x1c\n" +
 	"\x18TRACE_ACTION_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cTRACE_ACTION_MESSAGE_CREATED\x10\x01\x12\x1d\n" +
@@ -3994,157 +4229,165 @@ func file_tailbus_v1_agent_proto_rawDescGZIP() []byte {
 	return file_tailbus_v1_agent_proto_rawDescData
 }
 
-var file_tailbus_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_tailbus_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 60)
+var file_tailbus_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_tailbus_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 63)
 var file_tailbus_v1_agent_proto_goTypes = []any{
-	(TraceAction)(0),                  // 0: tailbus.v1.TraceAction
-	(*RegisterRequest)(nil),           // 1: tailbus.v1.RegisterRequest
-	(*RegisterResponse)(nil),          // 2: tailbus.v1.RegisterResponse
-	(*IntrospectHandleRequest)(nil),   // 3: tailbus.v1.IntrospectHandleRequest
-	(*IntrospectHandleResponse)(nil),  // 4: tailbus.v1.IntrospectHandleResponse
-	(*ListHandlesRequest)(nil),        // 5: tailbus.v1.ListHandlesRequest
-	(*ListHandlesResponse)(nil),       // 6: tailbus.v1.ListHandlesResponse
-	(*HandleEntry)(nil),               // 7: tailbus.v1.HandleEntry
-	(*FindHandlesRequest)(nil),        // 8: tailbus.v1.FindHandlesRequest
-	(*FindHandlesResponse)(nil),       // 9: tailbus.v1.FindHandlesResponse
-	(*HandleMatch)(nil),               // 10: tailbus.v1.HandleMatch
-	(*OpenSessionRequest)(nil),        // 11: tailbus.v1.OpenSessionRequest
-	(*OpenSessionResponse)(nil),       // 12: tailbus.v1.OpenSessionResponse
-	(*SendMessageRequest)(nil),        // 13: tailbus.v1.SendMessageRequest
-	(*SendMessageResponse)(nil),       // 14: tailbus.v1.SendMessageResponse
-	(*SubscribeRequest)(nil),          // 15: tailbus.v1.SubscribeRequest
-	(*IncomingMessage)(nil),           // 16: tailbus.v1.IncomingMessage
-	(*ResolveSessionRequest)(nil),     // 17: tailbus.v1.ResolveSessionRequest
-	(*ResolveSessionResponse)(nil),    // 18: tailbus.v1.ResolveSessionResponse
-	(*CreateRoomRequest)(nil),         // 19: tailbus.v1.CreateRoomRequest
-	(*CreateRoomResponse)(nil),        // 20: tailbus.v1.CreateRoomResponse
-	(*JoinRoomRequest)(nil),           // 21: tailbus.v1.JoinRoomRequest
-	(*JoinRoomResponse)(nil),          // 22: tailbus.v1.JoinRoomResponse
-	(*LeaveRoomRequest)(nil),          // 23: tailbus.v1.LeaveRoomRequest
-	(*LeaveRoomResponse)(nil),         // 24: tailbus.v1.LeaveRoomResponse
-	(*PostRoomMessageRequest)(nil),    // 25: tailbus.v1.PostRoomMessageRequest
-	(*PostRoomMessageResponse)(nil),   // 26: tailbus.v1.PostRoomMessageResponse
-	(*ListRoomsRequest)(nil),          // 27: tailbus.v1.ListRoomsRequest
-	(*ListRoomsResponse)(nil),         // 28: tailbus.v1.ListRoomsResponse
-	(*ListRoomMembersRequest)(nil),    // 29: tailbus.v1.ListRoomMembersRequest
-	(*ListRoomMembersResponse)(nil),   // 30: tailbus.v1.ListRoomMembersResponse
-	(*ReplayRoomRequest)(nil),         // 31: tailbus.v1.ReplayRoomRequest
-	(*ReplayRoomResponse)(nil),        // 32: tailbus.v1.ReplayRoomResponse
-	(*CloseRoomRequest)(nil),          // 33: tailbus.v1.CloseRoomRequest
-	(*CloseRoomResponse)(nil),         // 34: tailbus.v1.CloseRoomResponse
-	(*ListSessionsRequest)(nil),       // 35: tailbus.v1.ListSessionsRequest
-	(*ListSessionsResponse)(nil),      // 36: tailbus.v1.ListSessionsResponse
-	(*SessionInfo)(nil),               // 37: tailbus.v1.SessionInfo
-	(*GetNodeStatusRequest)(nil),      // 38: tailbus.v1.GetNodeStatusRequest
-	(*GetNodeStatusResponse)(nil),     // 39: tailbus.v1.GetNodeStatusResponse
-	(*RelayStatus)(nil),               // 40: tailbus.v1.RelayStatus
-	(*HandleInfo)(nil),                // 41: tailbus.v1.HandleInfo
-	(*PeerStatus)(nil),                // 42: tailbus.v1.PeerStatus
-	(*Counters)(nil),                  // 43: tailbus.v1.Counters
-	(*WatchActivityRequest)(nil),      // 44: tailbus.v1.WatchActivityRequest
-	(*ActivityEvent)(nil),             // 45: tailbus.v1.ActivityEvent
-	(*MessageRoutedEvent)(nil),        // 46: tailbus.v1.MessageRoutedEvent
-	(*SessionOpenedEvent)(nil),        // 47: tailbus.v1.SessionOpenedEvent
-	(*SessionResolvedEvent)(nil),      // 48: tailbus.v1.SessionResolvedEvent
-	(*HandleRegisteredEvent)(nil),     // 49: tailbus.v1.HandleRegisteredEvent
-	(*RoomCreatedEvent)(nil),          // 50: tailbus.v1.RoomCreatedEvent
-	(*RoomMessagePostedEvent)(nil),    // 51: tailbus.v1.RoomMessagePostedEvent
-	(*RoomMemberJoinedEvent)(nil),     // 52: tailbus.v1.RoomMemberJoinedEvent
-	(*RoomMemberLeftEvent)(nil),       // 53: tailbus.v1.RoomMemberLeftEvent
-	(*RoomClosedEvent)(nil),           // 54: tailbus.v1.RoomClosedEvent
-	(*TraceSpan)(nil),                 // 55: tailbus.v1.TraceSpan
-	(*GetTraceRequest)(nil),           // 56: tailbus.v1.GetTraceRequest
-	(*GetTraceResponse)(nil),          // 57: tailbus.v1.GetTraceResponse
-	(*ShutdownRequest)(nil),           // 58: tailbus.v1.ShutdownRequest
-	(*ShutdownResponse)(nil),          // 59: tailbus.v1.ShutdownResponse
-	nil,                               // 60: tailbus.v1.TraceSpan.MetadataEntry
-	(*messagepb.ServiceManifest)(nil), // 61: tailbus.v1.ServiceManifest
-	(*messagepb.Envelope)(nil),        // 62: tailbus.v1.Envelope
-	(*messagepb.RoomEvent)(nil),       // 63: tailbus.v1.RoomEvent
-	(*messagepb.RoomInfo)(nil),        // 64: tailbus.v1.RoomInfo
-	(*timestamppb.Timestamp)(nil),     // 65: google.protobuf.Timestamp
+	(UsageMetric)(0),                  // 0: tailbus.v1.UsageMetric
+	(TraceAction)(0),                  // 1: tailbus.v1.TraceAction
+	(*RegisterRequest)(nil),           // 2: tailbus.v1.RegisterRequest
+	(*RegisterResponse)(nil),          // 3: tailbus.v1.RegisterResponse
+	(*IntrospectHandleRequest)(nil),   // 4: tailbus.v1.IntrospectHandleRequest
+	(*IntrospectHandleResponse)(nil),  // 5: tailbus.v1.IntrospectHandleResponse
+	(*ListHandlesRequest)(nil),        // 6: tailbus.v1.ListHandlesRequest
+	(*ListHandlesResponse)(nil),       // 7: tailbus.v1.ListHandlesResponse
+	(*HandleEntry)(nil),               // 8: tailbus.v1.HandleEntry
+	(*FindHandlesRequest)(nil),        // 9: tailbus.v1.FindHandlesRequest
+	(*FindHandlesResponse)(nil),       // 10: tailbus.v1.FindHandlesResponse
+	(*HandleMatch)(nil),               // 11: tailbus.v1.HandleMatch
+	(*OpenSessionRequest)(nil),        // 12: tailbus.v1.OpenSessionRequest
+	(*OpenSessionResponse)(nil),       // 13: tailbus.v1.OpenSessionResponse
+	(*SendMessageRequest)(nil),        // 14: tailbus.v1.SendMessageRequest
+	(*SendMessageResponse)(nil),       // 15: tailbus.v1.SendMessageResponse
+	(*SubscribeRequest)(nil),          // 16: tailbus.v1.SubscribeRequest
+	(*IncomingMessage)(nil),           // 17: tailbus.v1.IncomingMessage
+	(*ResolveSessionRequest)(nil),     // 18: tailbus.v1.ResolveSessionRequest
+	(*ResolveSessionResponse)(nil),    // 19: tailbus.v1.ResolveSessionResponse
+	(*CreateRoomRequest)(nil),         // 20: tailbus.v1.CreateRoomRequest
+	(*CreateRoomResponse)(nil),        // 21: tailbus.v1.CreateRoomResponse
+	(*JoinRoomRequest)(nil),           // 22: tailbus.v1.JoinRoomRequest
+	(*JoinRoomResponse)(nil),          // 23: tailbus.v1.JoinRoomResponse
+	(*LeaveRoomRequest)(nil),          // 24: tailbus.v1.LeaveRoomRequest
+	(*LeaveRoomResponse)(nil),         // 25: tailbus.v1.LeaveRoomResponse
+	(*PostRoomMessageRequest)(nil),    // 26: tailbus.v1.PostRoomMessageRequest
+	(*PostRoomMessageResponse)(nil),   // 27: tailbus.v1.PostRoomMessageResponse
+	(*ListRoomsRequest)(nil),          // 28: tailbus.v1.ListRoomsRequest
+	(*ListRoomsResponse)(nil),         // 29: tailbus.v1.ListRoomsResponse
+	(*ListRoomMembersRequest)(nil),    // 30: tailbus.v1.ListRoomMembersRequest
+	(*ListRoomMembersResponse)(nil),   // 31: tailbus.v1.ListRoomMembersResponse
+	(*ReplayRoomRequest)(nil),         // 32: tailbus.v1.ReplayRoomRequest
+	(*ReplayRoomResponse)(nil),        // 33: tailbus.v1.ReplayRoomResponse
+	(*CloseRoomRequest)(nil),          // 34: tailbus.v1.CloseRoomRequest
+	(*CloseRoomResponse)(nil),         // 35: tailbus.v1.CloseRoomResponse
+	(*ListSessionsRequest)(nil),       // 36: tailbus.v1.ListSessionsRequest
+	(*ListSessionsResponse)(nil),      // 37: tailbus.v1.ListSessionsResponse
+	(*SessionInfo)(nil),               // 38: tailbus.v1.SessionInfo
+	(*GetNodeStatusRequest)(nil),      // 39: tailbus.v1.GetNodeStatusRequest
+	(*GetNodeStatusResponse)(nil),     // 40: tailbus.v1.GetNodeStatusResponse
+	(*RelayStatus)(nil),               // 41: tailbus.v1.RelayStatus
+	(*HandleInfo)(nil),                // 42: tailbus.v1.HandleInfo
+	(*PeerStatus)(nil),                // 43: tailbus.v1.PeerStatus
+	(*Counters)(nil),                  // 44: tailbus.v1.Counters
+	(*UsageBucket)(nil),               // 45: tailbus.v1.UsageBucket
+	(*UsageMetricHistory)(nil),        // 46: tailbus.v1.UsageMetricHistory
+	(*UsageHistory)(nil),              // 47: tailbus.v1.UsageHistory
+	(*WatchActivityRequest)(nil),      // 48: tailbus.v1.WatchActivityRequest
+	(*ActivityEvent)(nil),             // 49: tailbus.v1.ActivityEvent
+	(*MessageRoutedEvent)(nil),        // 50: tailbus.v1.MessageRoutedEvent
+	(*SessionOpenedEvent)(nil),        // 51: tailbus.v1.SessionOpenedEvent
+	(*SessionResolvedEvent)(nil),      // 52: tailbus.v1.SessionResolvedEvent
+	(*HandleRegisteredEvent)(nil),     // 53: tailbus.v1.HandleRegisteredEvent
+	(*RoomCreatedEvent)(nil),          // 54: tailbus.v1.RoomCreatedEvent
+	(*RoomMessagePostedEvent)(nil),    // 55: tailbus.v1.RoomMessagePostedEvent
+	(*RoomMemberJoinedEvent)(nil),     // 56: tailbus.v1.RoomMemberJoinedEvent
+	(*RoomMemberLeftEvent)(nil),       // 57: tailbus.v1.RoomMemberLeftEvent
+	(*RoomClosedEvent)(nil),           // 58: tailbus.v1.RoomClosedEvent
+	(*TraceSpan)(nil),                 // 59: tailbus.v1.TraceSpan
+	(*GetTraceRequest)(nil),           // 60: tailbus.v1.GetTraceRequest
+	(*GetTraceResponse)(nil),          // 61: tailbus.v1.GetTraceResponse
+	(*ShutdownRequest)(nil),           // 62: tailbus.v1.ShutdownRequest
+	(*ShutdownResponse)(nil),          // 63: tailbus.v1.ShutdownResponse
+	nil,                               // 64: tailbus.v1.TraceSpan.MetadataEntry
+	(*messagepb.ServiceManifest)(nil), // 65: tailbus.v1.ServiceManifest
+	(*messagepb.Envelope)(nil),        // 66: tailbus.v1.Envelope
+	(*messagepb.RoomEvent)(nil),       // 67: tailbus.v1.RoomEvent
+	(*messagepb.RoomInfo)(nil),        // 68: tailbus.v1.RoomInfo
+	(*timestamppb.Timestamp)(nil),     // 69: google.protobuf.Timestamp
 }
 var file_tailbus_v1_agent_proto_depIdxs = []int32{
-	61, // 0: tailbus.v1.RegisterRequest.manifest:type_name -> tailbus.v1.ServiceManifest
-	61, // 1: tailbus.v1.IntrospectHandleResponse.manifest:type_name -> tailbus.v1.ServiceManifest
-	7,  // 2: tailbus.v1.ListHandlesResponse.entries:type_name -> tailbus.v1.HandleEntry
-	61, // 3: tailbus.v1.HandleEntry.manifest:type_name -> tailbus.v1.ServiceManifest
-	10, // 4: tailbus.v1.FindHandlesResponse.matches:type_name -> tailbus.v1.HandleMatch
-	61, // 5: tailbus.v1.HandleMatch.manifest:type_name -> tailbus.v1.ServiceManifest
-	62, // 6: tailbus.v1.IncomingMessage.envelope:type_name -> tailbus.v1.Envelope
-	63, // 7: tailbus.v1.IncomingMessage.room_event:type_name -> tailbus.v1.RoomEvent
-	64, // 8: tailbus.v1.ListRoomsResponse.rooms:type_name -> tailbus.v1.RoomInfo
-	63, // 9: tailbus.v1.ReplayRoomResponse.events:type_name -> tailbus.v1.RoomEvent
-	37, // 10: tailbus.v1.ListSessionsResponse.sessions:type_name -> tailbus.v1.SessionInfo
-	65, // 11: tailbus.v1.GetNodeStatusResponse.started_at:type_name -> google.protobuf.Timestamp
-	41, // 12: tailbus.v1.GetNodeStatusResponse.handles:type_name -> tailbus.v1.HandleInfo
-	42, // 13: tailbus.v1.GetNodeStatusResponse.peers:type_name -> tailbus.v1.PeerStatus
-	37, // 14: tailbus.v1.GetNodeStatusResponse.sessions:type_name -> tailbus.v1.SessionInfo
-	43, // 15: tailbus.v1.GetNodeStatusResponse.counters:type_name -> tailbus.v1.Counters
-	40, // 16: tailbus.v1.GetNodeStatusResponse.relays:type_name -> tailbus.v1.RelayStatus
-	64, // 17: tailbus.v1.GetNodeStatusResponse.rooms:type_name -> tailbus.v1.RoomInfo
-	61, // 18: tailbus.v1.HandleInfo.manifest:type_name -> tailbus.v1.ServiceManifest
-	65, // 19: tailbus.v1.ActivityEvent.timestamp:type_name -> google.protobuf.Timestamp
-	46, // 20: tailbus.v1.ActivityEvent.message_routed:type_name -> tailbus.v1.MessageRoutedEvent
-	47, // 21: tailbus.v1.ActivityEvent.session_opened:type_name -> tailbus.v1.SessionOpenedEvent
-	48, // 22: tailbus.v1.ActivityEvent.session_resolved:type_name -> tailbus.v1.SessionResolvedEvent
-	49, // 23: tailbus.v1.ActivityEvent.handle_registered:type_name -> tailbus.v1.HandleRegisteredEvent
-	50, // 24: tailbus.v1.ActivityEvent.room_created:type_name -> tailbus.v1.RoomCreatedEvent
-	51, // 25: tailbus.v1.ActivityEvent.room_message_posted:type_name -> tailbus.v1.RoomMessagePostedEvent
-	52, // 26: tailbus.v1.ActivityEvent.room_member_joined:type_name -> tailbus.v1.RoomMemberJoinedEvent
-	53, // 27: tailbus.v1.ActivityEvent.room_member_left:type_name -> tailbus.v1.RoomMemberLeftEvent
-	54, // 28: tailbus.v1.ActivityEvent.room_closed:type_name -> tailbus.v1.RoomClosedEvent
-	0,  // 29: tailbus.v1.TraceSpan.action:type_name -> tailbus.v1.TraceAction
-	65, // 30: tailbus.v1.TraceSpan.timestamp:type_name -> google.protobuf.Timestamp
-	60, // 31: tailbus.v1.TraceSpan.metadata:type_name -> tailbus.v1.TraceSpan.MetadataEntry
-	55, // 32: tailbus.v1.GetTraceResponse.spans:type_name -> tailbus.v1.TraceSpan
-	1,  // 33: tailbus.v1.AgentAPI.Register:input_type -> tailbus.v1.RegisterRequest
-	3,  // 34: tailbus.v1.AgentAPI.IntrospectHandle:input_type -> tailbus.v1.IntrospectHandleRequest
-	5,  // 35: tailbus.v1.AgentAPI.ListHandles:input_type -> tailbus.v1.ListHandlesRequest
-	8,  // 36: tailbus.v1.AgentAPI.FindHandles:input_type -> tailbus.v1.FindHandlesRequest
-	11, // 37: tailbus.v1.AgentAPI.OpenSession:input_type -> tailbus.v1.OpenSessionRequest
-	13, // 38: tailbus.v1.AgentAPI.SendMessage:input_type -> tailbus.v1.SendMessageRequest
-	15, // 39: tailbus.v1.AgentAPI.Subscribe:input_type -> tailbus.v1.SubscribeRequest
-	17, // 40: tailbus.v1.AgentAPI.ResolveSession:input_type -> tailbus.v1.ResolveSessionRequest
-	19, // 41: tailbus.v1.AgentAPI.CreateRoom:input_type -> tailbus.v1.CreateRoomRequest
-	21, // 42: tailbus.v1.AgentAPI.JoinRoom:input_type -> tailbus.v1.JoinRoomRequest
-	23, // 43: tailbus.v1.AgentAPI.LeaveRoom:input_type -> tailbus.v1.LeaveRoomRequest
-	25, // 44: tailbus.v1.AgentAPI.PostRoomMessage:input_type -> tailbus.v1.PostRoomMessageRequest
-	27, // 45: tailbus.v1.AgentAPI.ListRooms:input_type -> tailbus.v1.ListRoomsRequest
-	29, // 46: tailbus.v1.AgentAPI.ListRoomMembers:input_type -> tailbus.v1.ListRoomMembersRequest
-	31, // 47: tailbus.v1.AgentAPI.ReplayRoom:input_type -> tailbus.v1.ReplayRoomRequest
-	33, // 48: tailbus.v1.AgentAPI.CloseRoom:input_type -> tailbus.v1.CloseRoomRequest
-	35, // 49: tailbus.v1.AgentAPI.ListSessions:input_type -> tailbus.v1.ListSessionsRequest
-	38, // 50: tailbus.v1.AgentAPI.GetNodeStatus:input_type -> tailbus.v1.GetNodeStatusRequest
-	44, // 51: tailbus.v1.AgentAPI.WatchActivity:input_type -> tailbus.v1.WatchActivityRequest
-	56, // 52: tailbus.v1.AgentAPI.GetTrace:input_type -> tailbus.v1.GetTraceRequest
-	58, // 53: tailbus.v1.AgentAPI.Shutdown:input_type -> tailbus.v1.ShutdownRequest
-	2,  // 54: tailbus.v1.AgentAPI.Register:output_type -> tailbus.v1.RegisterResponse
-	4,  // 55: tailbus.v1.AgentAPI.IntrospectHandle:output_type -> tailbus.v1.IntrospectHandleResponse
-	6,  // 56: tailbus.v1.AgentAPI.ListHandles:output_type -> tailbus.v1.ListHandlesResponse
-	9,  // 57: tailbus.v1.AgentAPI.FindHandles:output_type -> tailbus.v1.FindHandlesResponse
-	12, // 58: tailbus.v1.AgentAPI.OpenSession:output_type -> tailbus.v1.OpenSessionResponse
-	14, // 59: tailbus.v1.AgentAPI.SendMessage:output_type -> tailbus.v1.SendMessageResponse
-	16, // 60: tailbus.v1.AgentAPI.Subscribe:output_type -> tailbus.v1.IncomingMessage
-	18, // 61: tailbus.v1.AgentAPI.ResolveSession:output_type -> tailbus.v1.ResolveSessionResponse
-	20, // 62: tailbus.v1.AgentAPI.CreateRoom:output_type -> tailbus.v1.CreateRoomResponse
-	22, // 63: tailbus.v1.AgentAPI.JoinRoom:output_type -> tailbus.v1.JoinRoomResponse
-	24, // 64: tailbus.v1.AgentAPI.LeaveRoom:output_type -> tailbus.v1.LeaveRoomResponse
-	26, // 65: tailbus.v1.AgentAPI.PostRoomMessage:output_type -> tailbus.v1.PostRoomMessageResponse
-	28, // 66: tailbus.v1.AgentAPI.ListRooms:output_type -> tailbus.v1.ListRoomsResponse
-	30, // 67: tailbus.v1.AgentAPI.ListRoomMembers:output_type -> tailbus.v1.ListRoomMembersResponse
-	32, // 68: tailbus.v1.AgentAPI.ReplayRoom:output_type -> tailbus.v1.ReplayRoomResponse
-	34, // 69: tailbus.v1.AgentAPI.CloseRoom:output_type -> tailbus.v1.CloseRoomResponse
-	36, // 70: tailbus.v1.AgentAPI.ListSessions:output_type -> tailbus.v1.ListSessionsResponse
-	39, // 71: tailbus.v1.AgentAPI.GetNodeStatus:output_type -> tailbus.v1.GetNodeStatusResponse
-	45, // 72: tailbus.v1.AgentAPI.WatchActivity:output_type -> tailbus.v1.ActivityEvent
-	57, // 73: tailbus.v1.AgentAPI.GetTrace:output_type -> tailbus.v1.GetTraceResponse
-	59, // 74: tailbus.v1.AgentAPI.Shutdown:output_type -> tailbus.v1.ShutdownResponse
-	54, // [54:75] is the sub-list for method output_type
-	33, // [33:54] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	65, // 0: tailbus.v1.RegisterRequest.manifest:type_name -> tailbus.v1.ServiceManifest
+	65, // 1: tailbus.v1.IntrospectHandleResponse.manifest:type_name -> tailbus.v1.ServiceManifest
+	8,  // 2: tailbus.v1.ListHandlesResponse.entries:type_name -> tailbus.v1.HandleEntry
+	65, // 3: tailbus.v1.HandleEntry.manifest:type_name -> tailbus.v1.ServiceManifest
+	11, // 4: tailbus.v1.FindHandlesResponse.matches:type_name -> tailbus.v1.HandleMatch
+	65, // 5: tailbus.v1.HandleMatch.manifest:type_name -> tailbus.v1.ServiceManifest
+	66, // 6: tailbus.v1.IncomingMessage.envelope:type_name -> tailbus.v1.Envelope
+	67, // 7: tailbus.v1.IncomingMessage.room_event:type_name -> tailbus.v1.RoomEvent
+	68, // 8: tailbus.v1.ListRoomsResponse.rooms:type_name -> tailbus.v1.RoomInfo
+	67, // 9: tailbus.v1.ReplayRoomResponse.events:type_name -> tailbus.v1.RoomEvent
+	38, // 10: tailbus.v1.ListSessionsResponse.sessions:type_name -> tailbus.v1.SessionInfo
+	69, // 11: tailbus.v1.GetNodeStatusResponse.started_at:type_name -> google.protobuf.Timestamp
+	42, // 12: tailbus.v1.GetNodeStatusResponse.handles:type_name -> tailbus.v1.HandleInfo
+	43, // 13: tailbus.v1.GetNodeStatusResponse.peers:type_name -> tailbus.v1.PeerStatus
+	38, // 14: tailbus.v1.GetNodeStatusResponse.sessions:type_name -> tailbus.v1.SessionInfo
+	44, // 15: tailbus.v1.GetNodeStatusResponse.counters:type_name -> tailbus.v1.Counters
+	41, // 16: tailbus.v1.GetNodeStatusResponse.relays:type_name -> tailbus.v1.RelayStatus
+	68, // 17: tailbus.v1.GetNodeStatusResponse.rooms:type_name -> tailbus.v1.RoomInfo
+	47, // 18: tailbus.v1.GetNodeStatusResponse.usage:type_name -> tailbus.v1.UsageHistory
+	65, // 19: tailbus.v1.HandleInfo.manifest:type_name -> tailbus.v1.ServiceManifest
+	0,  // 20: tailbus.v1.UsageMetricHistory.metric:type_name -> tailbus.v1.UsageMetric
+	45, // 21: tailbus.v1.UsageMetricHistory.daily_buckets:type_name -> tailbus.v1.UsageBucket
+	46, // 22: tailbus.v1.UsageHistory.metrics:type_name -> tailbus.v1.UsageMetricHistory
+	69, // 23: tailbus.v1.ActivityEvent.timestamp:type_name -> google.protobuf.Timestamp
+	50, // 24: tailbus.v1.ActivityEvent.message_routed:type_name -> tailbus.v1.MessageRoutedEvent
+	51, // 25: tailbus.v1.ActivityEvent.session_opened:type_name -> tailbus.v1.SessionOpenedEvent
+	52, // 26: tailbus.v1.ActivityEvent.session_resolved:type_name -> tailbus.v1.SessionResolvedEvent
+	53, // 27: tailbus.v1.ActivityEvent.handle_registered:type_name -> tailbus.v1.HandleRegisteredEvent
+	54, // 28: tailbus.v1.ActivityEvent.room_created:type_name -> tailbus.v1.RoomCreatedEvent
+	55, // 29: tailbus.v1.ActivityEvent.room_message_posted:type_name -> tailbus.v1.RoomMessagePostedEvent
+	56, // 30: tailbus.v1.ActivityEvent.room_member_joined:type_name -> tailbus.v1.RoomMemberJoinedEvent
+	57, // 31: tailbus.v1.ActivityEvent.room_member_left:type_name -> tailbus.v1.RoomMemberLeftEvent
+	58, // 32: tailbus.v1.ActivityEvent.room_closed:type_name -> tailbus.v1.RoomClosedEvent
+	1,  // 33: tailbus.v1.TraceSpan.action:type_name -> tailbus.v1.TraceAction
+	69, // 34: tailbus.v1.TraceSpan.timestamp:type_name -> google.protobuf.Timestamp
+	64, // 35: tailbus.v1.TraceSpan.metadata:type_name -> tailbus.v1.TraceSpan.MetadataEntry
+	59, // 36: tailbus.v1.GetTraceResponse.spans:type_name -> tailbus.v1.TraceSpan
+	2,  // 37: tailbus.v1.AgentAPI.Register:input_type -> tailbus.v1.RegisterRequest
+	4,  // 38: tailbus.v1.AgentAPI.IntrospectHandle:input_type -> tailbus.v1.IntrospectHandleRequest
+	6,  // 39: tailbus.v1.AgentAPI.ListHandles:input_type -> tailbus.v1.ListHandlesRequest
+	9,  // 40: tailbus.v1.AgentAPI.FindHandles:input_type -> tailbus.v1.FindHandlesRequest
+	12, // 41: tailbus.v1.AgentAPI.OpenSession:input_type -> tailbus.v1.OpenSessionRequest
+	14, // 42: tailbus.v1.AgentAPI.SendMessage:input_type -> tailbus.v1.SendMessageRequest
+	16, // 43: tailbus.v1.AgentAPI.Subscribe:input_type -> tailbus.v1.SubscribeRequest
+	18, // 44: tailbus.v1.AgentAPI.ResolveSession:input_type -> tailbus.v1.ResolveSessionRequest
+	20, // 45: tailbus.v1.AgentAPI.CreateRoom:input_type -> tailbus.v1.CreateRoomRequest
+	22, // 46: tailbus.v1.AgentAPI.JoinRoom:input_type -> tailbus.v1.JoinRoomRequest
+	24, // 47: tailbus.v1.AgentAPI.LeaveRoom:input_type -> tailbus.v1.LeaveRoomRequest
+	26, // 48: tailbus.v1.AgentAPI.PostRoomMessage:input_type -> tailbus.v1.PostRoomMessageRequest
+	28, // 49: tailbus.v1.AgentAPI.ListRooms:input_type -> tailbus.v1.ListRoomsRequest
+	30, // 50: tailbus.v1.AgentAPI.ListRoomMembers:input_type -> tailbus.v1.ListRoomMembersRequest
+	32, // 51: tailbus.v1.AgentAPI.ReplayRoom:input_type -> tailbus.v1.ReplayRoomRequest
+	34, // 52: tailbus.v1.AgentAPI.CloseRoom:input_type -> tailbus.v1.CloseRoomRequest
+	36, // 53: tailbus.v1.AgentAPI.ListSessions:input_type -> tailbus.v1.ListSessionsRequest
+	39, // 54: tailbus.v1.AgentAPI.GetNodeStatus:input_type -> tailbus.v1.GetNodeStatusRequest
+	48, // 55: tailbus.v1.AgentAPI.WatchActivity:input_type -> tailbus.v1.WatchActivityRequest
+	60, // 56: tailbus.v1.AgentAPI.GetTrace:input_type -> tailbus.v1.GetTraceRequest
+	62, // 57: tailbus.v1.AgentAPI.Shutdown:input_type -> tailbus.v1.ShutdownRequest
+	3,  // 58: tailbus.v1.AgentAPI.Register:output_type -> tailbus.v1.RegisterResponse
+	5,  // 59: tailbus.v1.AgentAPI.IntrospectHandle:output_type -> tailbus.v1.IntrospectHandleResponse
+	7,  // 60: tailbus.v1.AgentAPI.ListHandles:output_type -> tailbus.v1.ListHandlesResponse
+	10, // 61: tailbus.v1.AgentAPI.FindHandles:output_type -> tailbus.v1.FindHandlesResponse
+	13, // 62: tailbus.v1.AgentAPI.OpenSession:output_type -> tailbus.v1.OpenSessionResponse
+	15, // 63: tailbus.v1.AgentAPI.SendMessage:output_type -> tailbus.v1.SendMessageResponse
+	17, // 64: tailbus.v1.AgentAPI.Subscribe:output_type -> tailbus.v1.IncomingMessage
+	19, // 65: tailbus.v1.AgentAPI.ResolveSession:output_type -> tailbus.v1.ResolveSessionResponse
+	21, // 66: tailbus.v1.AgentAPI.CreateRoom:output_type -> tailbus.v1.CreateRoomResponse
+	23, // 67: tailbus.v1.AgentAPI.JoinRoom:output_type -> tailbus.v1.JoinRoomResponse
+	25, // 68: tailbus.v1.AgentAPI.LeaveRoom:output_type -> tailbus.v1.LeaveRoomResponse
+	27, // 69: tailbus.v1.AgentAPI.PostRoomMessage:output_type -> tailbus.v1.PostRoomMessageResponse
+	29, // 70: tailbus.v1.AgentAPI.ListRooms:output_type -> tailbus.v1.ListRoomsResponse
+	31, // 71: tailbus.v1.AgentAPI.ListRoomMembers:output_type -> tailbus.v1.ListRoomMembersResponse
+	33, // 72: tailbus.v1.AgentAPI.ReplayRoom:output_type -> tailbus.v1.ReplayRoomResponse
+	35, // 73: tailbus.v1.AgentAPI.CloseRoom:output_type -> tailbus.v1.CloseRoomResponse
+	37, // 74: tailbus.v1.AgentAPI.ListSessions:output_type -> tailbus.v1.ListSessionsResponse
+	40, // 75: tailbus.v1.AgentAPI.GetNodeStatus:output_type -> tailbus.v1.GetNodeStatusResponse
+	49, // 76: tailbus.v1.AgentAPI.WatchActivity:output_type -> tailbus.v1.ActivityEvent
+	61, // 77: tailbus.v1.AgentAPI.GetTrace:output_type -> tailbus.v1.GetTraceResponse
+	63, // 78: tailbus.v1.AgentAPI.Shutdown:output_type -> tailbus.v1.ShutdownResponse
+	58, // [58:79] is the sub-list for method output_type
+	37, // [37:58] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_tailbus_v1_agent_proto_init() }
@@ -4152,7 +4395,7 @@ func file_tailbus_v1_agent_proto_init() {
 	if File_tailbus_v1_agent_proto != nil {
 		return
 	}
-	file_tailbus_v1_agent_proto_msgTypes[44].OneofWrappers = []any{
+	file_tailbus_v1_agent_proto_msgTypes[47].OneofWrappers = []any{
 		(*ActivityEvent_MessageRouted)(nil),
 		(*ActivityEvent_SessionOpened)(nil),
 		(*ActivityEvent_SessionResolved)(nil),
@@ -4168,8 +4411,8 @@ func file_tailbus_v1_agent_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tailbus_v1_agent_proto_rawDesc), len(file_tailbus_v1_agent_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   60,
+			NumEnums:      2,
+			NumMessages:   63,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

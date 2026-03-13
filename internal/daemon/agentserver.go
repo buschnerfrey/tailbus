@@ -78,6 +78,10 @@ type RoomService interface {
 	DashboardRooms(handles []string) ([]*messagepb.RoomInfo, error)
 }
 
+type UsageHistoryProvider interface {
+	LoadUsageHistory() (*agentpb.UsageHistory, error)
+}
+
 // AgentServer is the local gRPC server that agent programs connect to via Unix socket.
 type AgentServer struct {
 	agentpb.UnimplementedAgentAPIServer
@@ -118,6 +122,7 @@ type AgentServer struct {
 	// Dashboard dependencies (set via SetDashboardDeps)
 	dashResolver  *handle.Resolver
 	dashTransport *transport.GRPCTransport
+	dashUsage     UsageHistoryProvider
 	nodeID        string
 	startedAt     time.Time
 }
@@ -208,6 +213,10 @@ func (s *AgentServer) SetDashboardDeps(nodeID string, resolver *handle.Resolver,
 	s.nodeID = nodeID
 	s.dashResolver = resolver
 	s.dashTransport = tp
+}
+
+func (s *AgentServer) SetUsageHistoryProvider(provider UsageHistoryProvider) {
+	s.dashUsage = provider
 }
 
 // SetTracing sets the trace store and metrics for tracing support.
@@ -1066,6 +1075,14 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 	if s.activity != nil {
 		counters = s.activity.Counters()
 	}
+	var usage *agentpb.UsageHistory
+	if s.dashUsage != nil {
+		var err error
+		usage, err = s.dashUsage.LoadUsageHistory()
+		if err != nil {
+			s.logger.Warn("failed to load usage history", "error", err)
+		}
+	}
 
 	return &agentpb.GetNodeStatusResponse{
 		NodeId:    s.nodeID,
@@ -1076,6 +1093,7 @@ func (s *AgentServer) GetNodeStatus(_ context.Context, _ *agentpb.GetNodeStatusR
 		Counters:  counters,
 		Relays:    relays,
 		Rooms:     rooms,
+		Usage:     usage,
 	}, nil
 }
 

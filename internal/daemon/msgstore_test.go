@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/session"
 )
@@ -245,5 +246,50 @@ func TestMessageStore_RoomReplayRetention(t *testing.T) {
 	}
 	if events[0].RoomSeq != 2 || events[1].RoomSeq != 3 {
 		t.Fatalf("unexpected replay sequences: %d, %d", events[0].RoomSeq, events[1].RoomSeq)
+	}
+}
+
+func TestMessageStore_UsageHistoryRoundTrip(t *testing.T) {
+	ms := testStore(t)
+
+	day1 := time.Date(2026, time.March, 3, 9, 15, 0, 0, time.UTC)
+	day2 := time.Date(2026, time.March, 5, 11, 45, 0, 0, time.UTC)
+
+	if err := ms.RecordUsage(agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED, day1, 3); err != nil {
+		t.Fatalf("record usage day1: %v", err)
+	}
+	if err := ms.RecordUsage(agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED, day1.Add(2*time.Hour), 2); err != nil {
+		t.Fatalf("record usage day1 second bucket: %v", err)
+	}
+	if err := ms.RecordUsage(agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED, day2, 4); err != nil {
+		t.Fatalf("record usage day2: %v", err)
+	}
+	if err := ms.RecordUsage(agentpb.UsageMetric_USAGE_METRIC_ROOMS_CREATED, day2, 1); err != nil {
+		t.Fatalf("record usage rooms created: %v", err)
+	}
+
+	history, err := ms.LoadUsageHistory()
+	if err != nil {
+		t.Fatalf("load usage history: %v", err)
+	}
+	if len(history.Metrics) != 4 {
+		t.Fatalf("metrics = %d, want 4", len(history.Metrics))
+	}
+	routed := history.Metrics[0]
+	if routed.Metric != agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED {
+		t.Fatalf("metric = %v, want routed messages", routed.Metric)
+	}
+	if routed.Total != 9 {
+		t.Fatalf("routed total = %d, want 9", routed.Total)
+	}
+	if len(routed.DailyBuckets) != 2 {
+		t.Fatalf("routed daily buckets = %d, want 2", len(routed.DailyBuckets))
+	}
+	if routed.DailyBuckets[0].Count != 5 || routed.DailyBuckets[1].Count != 4 {
+		t.Fatalf("unexpected routed bucket counts: %d, %d", routed.DailyBuckets[0].Count, routed.DailyBuckets[1].Count)
+	}
+	roomsCreated := history.Metrics[3]
+	if roomsCreated.Total != 1 {
+		t.Fatalf("rooms created total = %d, want 1", roomsCreated.Total)
 	}
 }

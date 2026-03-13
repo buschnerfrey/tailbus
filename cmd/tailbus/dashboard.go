@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -121,6 +122,19 @@ var (
 
 	flowStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("51"))
+
+	usageLowStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("242"))
+
+	usageMidStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("110"))
+
+	usageHighStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("81"))
+
+	usagePeakStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("51")).
+			Bold(true)
 )
 
 // Top panel view mode
@@ -129,6 +143,21 @@ type topViewMode int
 const (
 	topViewTopology topViewMode = iota
 	topViewDetail
+)
+
+type rightPanelMode int
+
+const (
+	rightPanelActivity rightPanelMode = iota
+	rightPanelUsage
+)
+
+type usageRange int
+
+const (
+	usageRange7d usageRange = iota
+	usageRange30d
+	usageRangeAll
 )
 
 // Messages
@@ -218,6 +247,9 @@ type dashboardModel struct {
 	err              error
 	quitting         bool
 	topView          topViewMode
+	rightPanel       rightPanelMode
+	usageMetric      agentpb.UsageMetric
+	usageRange       usageRange
 }
 
 type activityEntry struct {
@@ -233,6 +265,8 @@ func newDashboardModel(client dashboardClient) dashboardModel {
 		client:           client,
 		busyTurns:        make(map[string]busyTurn),
 		handleLastStatus: make(map[string]handleTurnState),
+		usageMetric:      agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED,
+		usageRange:       usageRange30d,
 	}
 }
 
@@ -390,6 +424,32 @@ func shouldClearStatus(err error) bool {
 		strings.Contains(text, "closed network connection")
 }
 
+func cycleUsageRange(current usageRange) usageRange {
+	switch current {
+	case usageRange7d:
+		return usageRange30d
+	case usageRange30d:
+		return usageRangeAll
+	default:
+		return usageRange7d
+	}
+}
+
+func cycleUsageMetric(current agentpb.UsageMetric) agentpb.UsageMetric {
+	order := []agentpb.UsageMetric{
+		agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED,
+		agentpb.UsageMetric_USAGE_METRIC_SESSIONS_OPENED,
+		agentpb.UsageMetric_USAGE_METRIC_ROOM_MESSAGES_POSTED,
+		agentpb.UsageMetric_USAGE_METRIC_ROOMS_CREATED,
+	}
+	for i, metric := range order {
+		if metric == current {
+			return order[(i+1)%len(order)]
+		}
+	}
+	return order[0]
+}
+
 func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -397,8 +457,21 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
-		case "r":
+		case "R":
 			return m, m.fetchStatus
+		case "r":
+			m.usageRange = cycleUsageRange(m.usageRange)
+			return m, nil
+		case "m":
+			m.usageMetric = cycleUsageMetric(m.usageMetric)
+			return m, nil
+		case "u":
+			if m.rightPanel == rightPanelActivity {
+				m.rightPanel = rightPanelUsage
+			} else {
+				m.rightPanel = rightPanelActivity
+			}
+			return m, nil
 		case "c":
 			m.activity = nil
 			return m, nil
@@ -458,15 +531,17 @@ func (m dashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.updateBusyTurns(e.RoomMessagePosted, now)
 			m.updateHandleTurnState(e.RoomMessagePosted)
-			for _, member := range e.RoomMessagePosted.MemberHandles {
-				if member == "" || member == e.RoomMessagePosted.FromHandle {
-					continue
+			if shouldFlashRoomBroadcast(e.RoomMessagePosted) {
+				for _, member := range e.RoomMessagePosted.MemberHandles {
+					if member == "" || member == e.RoomMessagePosted.FromHandle {
+						continue
+					}
+					m.flashes = append(m.flashes, edgeFlash{
+						fromHandle: e.RoomMessagePosted.FromHandle,
+						toHandle:   member,
+						at:         now,
+					})
 				}
-				m.flashes = append(m.flashes, edgeFlash{
-					fromHandle: e.RoomMessagePosted.FromHandle,
-					toHandle:   member,
-					at:         now,
-				})
 			}
 		}
 		return m, m.watchNext
@@ -648,6 +723,22 @@ func shouldDisplayActivity(event *agentpb.ActivityEvent) bool {
 
 func isTurnReplyKind(kind string) bool {
 	return strings.HasSuffix(kind, "_reply") || kind == "apply_result"
+}
+
+func isTurnLifecycleKind(kind string) bool {
+	switch kind {
+	case "turn_request", "turn_progress", "turn_timeout":
+		return true
+	default:
+		return isTurnReplyKind(kind)
+	}
+}
+
+func shouldFlashRoomBroadcast(event *agentpb.RoomMessagePostedEvent) bool {
+	if event == nil {
+		return false
+	}
+	return !isTurnLifecycleKind(event.ContentKind)
 }
 
 func (m *dashboardModel) updateBusyTurns(event *agentpb.RoomMessagePostedEvent, now time.Time) {
@@ -864,6 +955,12 @@ func (m dashboardModel) isNodeActive(n topoNode) bool {
 		}
 	}
 	return false
+}
+
+// shouldAnimateNodeBorder keeps border animation alive while a node has a
+// currently working turn, even if no fresh message flash is visible.
+func (m dashboardModel) shouldAnimateNodeBorder(n topoNode) bool {
+	return m.isNodeActive(n) || m.nodeState(n) == handleTurnWorking
 }
 
 // buildTopoNodes converts status into a list of topology nodes.
@@ -1127,7 +1224,7 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 	}
 
 	// Build local node box
-	localActive := m.isNodeActive(local)
+	localActive := m.shouldAnimateNodeBorder(local)
 	localActiveHandles := m.activeHandlesFor(local)
 	localBox := renderNodeBox(local, true, m.nodeState(local), localActive, localActiveHandles, m.animFrame)
 
@@ -1156,7 +1253,7 @@ func (m dashboardModel) renderTopologyGraph(nodes []topoNode, width, height int)
 
 	// Render each remote with edge from local
 	for i, remote := range remotes {
-		remoteActive := m.isNodeActive(remote)
+		remoteActive := m.shouldAnimateNodeBorder(remote)
 		remoteActiveHandles := m.activeHandlesFor(remote)
 		remoteBox := renderNodeBox(remote, false, m.nodeState(remote), remoteActive, remoteActiveHandles, m.animFrame)
 		flashDir := m.flashDirBetween(local, remote)
@@ -1630,7 +1727,7 @@ func (m dashboardModel) View() string {
 	rightW := totalWidth - leftW - 4
 
 	hsContent := m.renderHandlesSessions(leftW, bottomHeight-2)
-	actContent := m.renderActivity(rightW, bottomHeight-2)
+	actContent := m.renderRightPanel(rightW, bottomHeight-2)
 	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top,
 		sectionStyle.Width(leftW).MaxHeight(bottomHeight).Render(hsContent),
 		sectionStyle.Width(rightW).MaxHeight(bottomHeight).Render(actContent),
@@ -1638,10 +1735,13 @@ func (m dashboardModel) View() string {
 	b.WriteString(bottomRow + "\n")
 
 	// Help bar
-	help := fmt.Sprintf("  %s quit  %s refresh  %s clear  %s switch view",
+	help := fmt.Sprintf("  %s quit  %s range  %s metric  %s usage/feed  %s clear  %s refresh  %s switch view",
 		keyStyle.Render("q"),
 		keyStyle.Render("r"),
+		keyStyle.Render("m"),
+		keyStyle.Render("u"),
 		keyStyle.Render("c"),
+		keyStyle.Render("R"),
 		keyStyle.Render("Tab"),
 	)
 	b.WriteString(helpStyle.Render(help) + "\n")
@@ -1833,6 +1933,253 @@ func (m dashboardModel) renderActivity(width, maxLines int) string {
 			line = line[:width-2]
 		}
 		b.WriteString(entry.style.Render(line) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (m dashboardModel) renderRightPanel(width, maxLines int) string {
+	if m.rightPanel == rightPanelUsage {
+		return m.renderUsage(width, maxLines)
+	}
+	return m.renderActivity(width, maxLines)
+}
+
+func usageMetricLabel(metric agentpb.UsageMetric) string {
+	switch metric {
+	case agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED:
+		return "routed messages"
+	case agentpb.UsageMetric_USAGE_METRIC_SESSIONS_OPENED:
+		return "sessions opened"
+	case agentpb.UsageMetric_USAGE_METRIC_ROOM_MESSAGES_POSTED:
+		return "room messages"
+	case agentpb.UsageMetric_USAGE_METRIC_ROOMS_CREATED:
+		return "rooms created"
+	default:
+		return "activity"
+	}
+}
+
+func usageRangeLabel(r usageRange) string {
+	switch r {
+	case usageRange7d:
+		return "last 7 days"
+	case usageRange30d:
+		return "last 30 days"
+	default:
+		return "all time"
+	}
+}
+
+func metricHistory(status *agentpb.GetNodeStatusResponse, metric agentpb.UsageMetric) *agentpb.UsageMetricHistory {
+	if status == nil || status.Usage == nil {
+		return nil
+	}
+	for _, history := range status.Usage.Metrics {
+		if history != nil && history.Metric == metric {
+			return history
+		}
+	}
+	return nil
+}
+
+func dayStartUTC(ts time.Time) time.Time {
+	ts = ts.UTC()
+	return time.Date(ts.Year(), ts.Month(), ts.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func mondayOffset(day time.Weekday) int {
+	return (int(day) + 6) % 7
+}
+
+func renderUsageIntensity(count, max int64) string {
+	switch {
+	case count <= 0:
+		return helpStyle.Render("·")
+	case max <= 1:
+		return usagePeakStyle.Render("█")
+	}
+	ratio := float64(count) / math.Max(float64(max), 1)
+	switch {
+	case ratio < 0.25:
+		return usageLowStyle.Render("░")
+	case ratio < 0.5:
+		return usageMidStyle.Render("▒")
+	case ratio < 0.75:
+		return usageHighStyle.Render("▓")
+	default:
+		return usagePeakStyle.Render("█")
+	}
+}
+
+func truncateToWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) > width {
+		return string(runes[:width])
+	}
+	return s
+}
+
+func (m dashboardModel) renderUsage(width, maxLines int) string {
+	var b strings.Builder
+	title := "USAGE"
+	if m.status == nil {
+		b.WriteString(headerStyle.Render(title) + "\n")
+		b.WriteString(helpStyle.Render("  (waiting for status...)"))
+		return b.String()
+	}
+
+	history := metricHistory(m.status, m.usageMetric)
+	b.WriteString(headerStyle.Render(title))
+	b.WriteString(helpStyle.Render(fmt.Sprintf("  [%s | %s | u:feed]", usageMetricLabel(m.usageMetric), usageRangeLabel(m.usageRange))))
+	b.WriteString("\n")
+
+	today := dayStartUTC(time.Now())
+	rangeStart := today
+	switch m.usageRange {
+	case usageRange7d:
+		rangeStart = today.AddDate(0, 0, -6)
+	case usageRange30d:
+		rangeStart = today.AddDate(0, 0, -29)
+	default:
+		if history != nil && len(history.DailyBuckets) > 0 {
+			rangeStart = dayStartUTC(time.Unix(history.DailyBuckets[0].BucketStartUnix, 0))
+			for _, bucket := range history.DailyBuckets[1:] {
+				if bucket == nil {
+					continue
+				}
+				day := dayStartUTC(time.Unix(bucket.BucketStartUnix, 0))
+				if day.Before(rangeStart) {
+					rangeStart = day
+				}
+			}
+		} else {
+			rangeStart = today.AddDate(0, 0, -29)
+		}
+	}
+
+	dailyCounts := map[int64]int64{}
+	var rangeTotal int64
+	var activeDays int
+	var busiestDay time.Time
+	var busiestCount int64
+	if history != nil {
+		for _, bucket := range history.DailyBuckets {
+			if bucket == nil || bucket.Count <= 0 {
+				continue
+			}
+			day := dayStartUTC(time.Unix(bucket.BucketStartUnix, 0))
+			if day.Before(rangeStart) || day.After(today) {
+				continue
+			}
+			dayUnix := day.Unix()
+			dailyCounts[dayUnix] += bucket.Count
+		}
+	}
+	for dayUnix, count := range dailyCounts {
+		rangeTotal += count
+		activeDays++
+		if count > busiestCount {
+			busiestCount = count
+			busiestDay = time.Unix(dayUnix, 0).UTC()
+		}
+	}
+
+	gridStart := rangeStart.AddDate(0, 0, -mondayOffset(rangeStart.Weekday()))
+	gridEnd := today
+	cols := int(gridEnd.Sub(gridStart).Hours()/24)/7 + 1
+	maxCols := width - 8
+	if maxCols < 8 {
+		maxCols = 8
+	}
+	clipped := false
+	if cols > maxCols {
+		clipped = true
+		gridStart = gridStart.AddDate(0, 0, (cols-maxCols)*7)
+		cols = maxCols
+	}
+
+	monthLine := make([]rune, cols)
+	for i := range monthLine {
+		monthLine[i] = ' '
+	}
+	lastMonth := time.Month(0)
+	for col := 0; col < cols; col++ {
+		weekStart := gridStart.AddDate(0, 0, col*7)
+		if weekStart.Month() == lastMonth && col != 0 {
+			continue
+		}
+		lastMonth = weekStart.Month()
+		label := []rune(weekStart.Format("Jan"))
+		for i, r := range label {
+			pos := col + i
+			if pos >= len(monthLine) {
+				break
+			}
+			monthLine[pos] = r
+		}
+	}
+	b.WriteString("      " + string(monthLine) + "\n")
+
+	rowLabels := []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
+	var visibleMax int64
+	for _, count := range dailyCounts {
+		if count > visibleMax {
+			visibleMax = count
+		}
+	}
+	for row := 0; row < 7; row++ {
+		label := "   "
+		if row == 0 || row == 2 || row == 4 || row == 6 {
+			label = rowLabels[row]
+		}
+		b.WriteString(fmt.Sprintf("  %-3s ", label))
+		for col := 0; col < cols; col++ {
+			day := gridStart.AddDate(0, 0, col*7+row)
+			if day.Before(rangeStart) || day.After(gridEnd) {
+				b.WriteString(" ")
+				continue
+			}
+			b.WriteString(renderUsageIntensity(dailyCounts[day.Unix()], visibleMax))
+		}
+		b.WriteString("\n")
+	}
+
+	legend := "      Less " + usageLowStyle.Render("░") + " " + usageMidStyle.Render("▒") + " " + usageHighStyle.Render("▓") + " " + usagePeakStyle.Render("█") + " More"
+	b.WriteString(truncateToWidth(legend, width-1) + "\n")
+
+	if clipped {
+		b.WriteString(helpStyle.Render(fmt.Sprintf("  showing last %d weeks of %s", cols, usageRangeLabel(m.usageRange))) + "\n")
+	}
+
+	totalDays := int(today.Sub(rangeStart).Hours()/24) + 1
+	busiestLabel := "n/a"
+	if !busiestDay.IsZero() {
+		busiestLabel = busiestDay.Format("Jan 2")
+	}
+	openSessions := int64(0)
+	for _, sess := range m.status.Sessions {
+		if sess.State == "open" {
+			openSessions++
+		}
+	}
+	roomsCreated := int64(0)
+	messagesRouted := int64(0)
+	if m.status.Counters != nil {
+		roomsCreated = m.status.Counters.RoomsCreated
+		messagesRouted = m.status.Counters.MessagesRouted
+	}
+	stats1 := fmt.Sprintf("  Total: %d   Active days: %d/%d   Busiest day: %s", rangeTotal, activeDays, totalDays, busiestLabel)
+	stats2 := fmt.Sprintf("  Open sessions: %d   Rooms created: %d   Messages routed: %d", openSessions, roomsCreated, messagesRouted)
+	b.WriteString(truncateToWidth(stats1, width-1))
+	if maxLines > 12 {
+		b.WriteString("\n")
+		b.WriteString(truncateToWidth(stats2, width-1))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

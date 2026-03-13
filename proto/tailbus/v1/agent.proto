@@ -238,6 +238,7 @@ message GetNodeStatusResponse {
   Counters counters = 6;
   repeated RelayStatus relays = 7;
   repeated RoomInfo rooms = 8;
+  UsageHistory usage = 9;
 }
 
 message RelayStatus {
@@ -277,6 +278,29 @@ message Counters {
   int64 room_members_joined = 9;
   int64 room_members_left = 10;
   int64 rooms_closed = 11;
+}
+
+enum UsageMetric {
+  USAGE_METRIC_UNSPECIFIED = 0;
+  USAGE_METRIC_MESSAGES_ROUTED = 1;
+  USAGE_METRIC_SESSIONS_OPENED = 2;
+  USAGE_METRIC_ROOM_MESSAGES_POSTED = 3;
+  USAGE_METRIC_ROOMS_CREATED = 4;
+}
+
+message UsageBucket {
+  int64 bucket_start_unix = 1;
+  int64 count = 2;
+}
+
+message UsageMetricHistory {
+  UsageMetric metric = 1;
+  int64 total = 2;
+  repeated UsageBucket daily_buckets = 3;
+}
+
+message UsageHistory {
+  repeated UsageMetricHistory metrics = 1;
 }
 
 message WatchActivityRequest {}

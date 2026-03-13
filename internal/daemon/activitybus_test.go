@@ -9,6 +9,20 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+type testUsageRecorder struct {
+	mu      sync.Mutex
+	metrics []agentpb.UsageMetric
+}
+
+func (r *testUsageRecorder) RecordUsage(metric agentpb.UsageMetric, at time.Time, count int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := int64(0); i < count; i++ {
+		r.metrics = append(r.metrics, metric)
+	}
+	return nil
+}
+
 func TestActivityBus_SubscribeEmitUnsubscribe(t *testing.T) {
 	bus := NewActivityBus()
 
@@ -146,6 +160,33 @@ func TestActivityBus_Counters(t *testing.T) {
 	}
 	if c.RoomsClosed != 1 {
 		t.Errorf("rooms closed = %d, want 1", c.RoomsClosed)
+	}
+}
+
+func TestActivityBus_RecordsUsageMetrics(t *testing.T) {
+	bus := NewActivityBus()
+	recorder := &testUsageRecorder{}
+	bus.SetUsageRecorder(recorder)
+
+	bus.EmitMessageRouted("s1", "a", "b", false, "", "")
+	bus.EmitSessionOpened("s1", "a", "b")
+	bus.EmitRoomCreated("room-1", "design", "a", []string{"a"})
+	bus.EmitRoomMessagePosted("room-1", 1, "a", []string{"a"}, "", "application/json", "turn_request", "b", "turn-1", "", 1)
+
+	got := recorder.metrics
+	want := []agentpb.UsageMetric{
+		agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED,
+		agentpb.UsageMetric_USAGE_METRIC_SESSIONS_OPENED,
+		agentpb.UsageMetric_USAGE_METRIC_ROOMS_CREATED,
+		agentpb.UsageMetric_USAGE_METRIC_ROOM_MESSAGES_POSTED,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("usage metrics = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("usage metric[%d] = %v, want %v", i, got[i], want[i])
+		}
 	}
 }
 

@@ -112,6 +112,7 @@ func New(cfg *config.DaemonConfig, logger *slog.Logger) (*Daemon, error) {
 		}
 		return nil, fmt.Errorf("open message store: %w", err)
 	}
+	activity.SetUsageRecorder(msgStore)
 
 	// Wire session persistence to durable store
 	sessions.SetPersistence(
@@ -327,6 +328,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Wire dashboard dependencies
 	d.agentServer.SetDashboardDeps(d.cfg.NodeID, d.resolver, d.transport)
+	d.agentServer.SetUsageHistoryProvider(d.msgStore)
 
 	// Resolve authentication before connecting to coord
 	authToken, err := d.resolveAuth(innerCtx)

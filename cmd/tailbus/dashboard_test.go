@@ -288,6 +288,41 @@ func TestBuildTopoNodesSortsPeersAndRelaysStably(t *testing.T) {
 	}
 }
 
+func TestRenderUsageShowsHeatmapAndStats(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+	model.rightPanel = rightPanelUsage
+	model.usageMetric = agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED
+	model.usageRange = usageRange30d
+	model.status = &agentpb.GetNodeStatusResponse{
+		Sessions: []*agentpb.SessionInfo{
+			{SessionId: "sess-1", State: "open"},
+		},
+		Counters: &agentpb.Counters{
+			MessagesRouted: 12,
+			RoomsCreated:   3,
+		},
+		Usage: &agentpb.UsageHistory{
+			Metrics: []*agentpb.UsageMetricHistory{
+				{
+					Metric: agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED,
+					Total:  12,
+					DailyBuckets: []*agentpb.UsageBucket{
+						{BucketStartUnix: time.Now().UTC().AddDate(0, 0, -2).Truncate(24 * time.Hour).Unix(), Count: 4},
+						{BucketStartUnix: time.Now().UTC().AddDate(0, 0, -1).Truncate(24 * time.Hour).Unix(), Count: 8},
+					},
+				},
+			},
+		},
+	}
+
+	view := model.renderRightPanel(60, 16)
+	for _, want := range []string{"USAGE", "Total:", "Active days:", "Messages routed: 12"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("renderRightPanel missing %q in:\n%s", want, view)
+		}
+	}
+}
+
 func TestDashboardBusyTurnTracksProgress(t *testing.T) {
 	model := newDashboardModel(&fakeDashboardClient{})
 	now := time.Now()
@@ -506,6 +541,69 @@ func TestWorkingBusyTurnDoesNotRenderNodeAsActive(t *testing.T) {
 	}
 }
 
+func TestTurnLifecycleRoomMessageDoesNotBroadcastFlashes(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+
+	next, _ := model.Update(activityMsg(&agentpb.ActivityEvent{
+		Event: &agentpb.ActivityEvent_RoomMessagePosted{
+			RoomMessagePosted: &agentpb.RoomMessagePostedEvent{
+				RoomId:        "room-1",
+				FromHandle:    "nova",
+				MemberHandles: []string{"you", "atlas", "nova"},
+				TargetHandle:  "nova",
+				TurnId:        "turn-1",
+				ContentKind:   "turn_request",
+				Round:         1,
+			},
+		},
+	}))
+	updated := next.(dashboardModel)
+
+	novaNode := topoNode{handles: []string{"nova"}}
+	atlasNode := topoNode{handles: []string{"atlas"}}
+	controlNode := topoNode{handles: []string{"you"}}
+
+	if dir := updated.flashDirBetween(controlNode, novaNode); dir != flashNone {
+		t.Fatalf("expected turn lifecycle message not to create edge flash, got %v", dir)
+	}
+	if updated.isNodeActive(atlasNode) {
+		t.Fatal("expected unrelated room member not to be marked active by turn lifecycle message")
+	}
+	if active := updated.activeHandlesFor(atlasNode); len(active) != 0 {
+		t.Fatalf("expected no active atlas handles, got %v", active)
+	}
+	if state := updated.nodeState(novaNode); state != handleTurnWorking {
+		t.Fatalf("nova nodeState = %q, want %q", state, handleTurnWorking)
+	}
+}
+
+func TestChatRoomMessageStillBroadcastsFlashes(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+
+	next, _ := model.Update(activityMsg(&agentpb.ActivityEvent{
+		Event: &agentpb.ActivityEvent_RoomMessagePosted{
+			RoomMessagePosted: &agentpb.RoomMessagePostedEvent{
+				RoomId:        "room-1",
+				FromHandle:    "nova",
+				MemberHandles: []string{"you", "atlas", "nova"},
+				ContentKind:   "chat",
+			},
+		},
+	}))
+	updated := next.(dashboardModel)
+
+	atlasNode := topoNode{handles: []string{"atlas"}}
+	controlNode := topoNode{handles: []string{"you"}}
+	novaNode := topoNode{handles: []string{"nova"}}
+
+	if !updated.isNodeActive(atlasNode) {
+		t.Fatal("expected chat message to mark atlas node active")
+	}
+	if dir := updated.flashDirBetween(controlNode, novaNode); dir != flashBtoA {
+		t.Fatalf("expected chat message from nova to you to flash remote->local, got %v", dir)
+	}
+}
+
 func TestNodeStateUsesBusyTurnAndReplyStatus(t *testing.T) {
 	model := newDashboardModel(&fakeDashboardClient{})
 	node := topoNode{handles: []string{"implementer"}}
@@ -575,6 +673,33 @@ func TestUpdateHandleTurnStateTracksFailuresAndClearsOnSuccess(t *testing.T) {
 	})
 	if _, ok := model.handleLastStatus["implementer"]; ok {
 		t.Fatal("expected new turn request to clear prior error state")
+	}
+}
+
+func TestShouldAnimateNodeBorderForWorkingTurn(t *testing.T) {
+	model := newDashboardModel(&fakeDashboardClient{})
+	node := topoNode{id: "implement-node", handles: []string{"implementer"}}
+
+	model.busyTurns["turn-1"] = busyTurn{
+		turnID:   "turn-1",
+		toHandle: "implementer",
+		status:   "working",
+	}
+
+	if model.isNodeActive(node) {
+		t.Fatal("expected working busy turn not to mark node active for traffic semantics")
+	}
+	if !model.shouldAnimateNodeBorder(node) {
+		t.Fatal("expected working busy turn to animate node border")
+	}
+
+	model.busyTurns["turn-1"] = busyTurn{
+		turnID:   "turn-1",
+		toHandle: "implementer",
+		status:   "stalled",
+	}
+	if model.shouldAnimateNodeBorder(node) {
+		t.Fatal("expected stalled turn not to animate node border")
 	}
 }
 

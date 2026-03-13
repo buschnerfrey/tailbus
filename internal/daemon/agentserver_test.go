@@ -59,6 +59,14 @@ type fakeDashboardRoomService struct {
 	rooms []*messagepb.RoomInfo
 }
 
+type fakeUsageHistoryProvider struct {
+	history *agentpb.UsageHistory
+}
+
+func (f *fakeUsageHistoryProvider) LoadUsageHistory() (*agentpb.UsageHistory, error) {
+	return f.history, nil
+}
+
 func (f *fakeDashboardRoomService) CreateRoom(context.Context, string, string, []string) (*messagepb.RoomInfo, error) {
 	return nil, nil
 }
@@ -272,6 +280,19 @@ func TestGetNodeStatusIncludesRooms(t *testing.T) {
 			},
 		},
 	})
+	srv.SetUsageHistoryProvider(&fakeUsageHistoryProvider{
+		history: &agentpb.UsageHistory{
+			Metrics: []*agentpb.UsageMetricHistory{
+				{
+					Metric: agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED,
+					Total:  7,
+					DailyBuckets: []*agentpb.UsageBucket{
+						{BucketStartUnix: time.Date(2026, time.March, 3, 0, 0, 0, 0, time.UTC).Unix(), Count: 7},
+					},
+				},
+			},
+		},
+	})
 
 	statusResp, err := srv.GetNodeStatus(context.Background(), &agentpb.GetNodeStatusRequest{})
 	if err != nil {
@@ -282,6 +303,12 @@ func TestGetNodeStatusIncludesRooms(t *testing.T) {
 	}
 	if statusResp.Rooms[0].RoomId != "room-1" {
 		t.Fatalf("room id = %q, want room-1", statusResp.Rooms[0].RoomId)
+	}
+	if statusResp.Usage == nil || len(statusResp.Usage.Metrics) != 1 {
+		t.Fatalf("usage metrics = %v, want 1 metric", statusResp.Usage)
+	}
+	if statusResp.Usage.Metrics[0].Total != 7 {
+		t.Fatalf("usage total = %d, want 7", statusResp.Usage.Metrics[0].Total)
 	}
 }
 

@@ -9,23 +9,28 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+type UsageRecorder interface {
+	RecordUsage(metric agentpb.UsageMetric, at time.Time, count int64) error
+}
+
 // ActivityBus is an in-process pub/sub for dashboard activity events.
 // It uses non-blocking sends so subscribers never slow down the daemon.
 type ActivityBus struct {
-	mu   sync.RWMutex
-	subs map[chan *agentpb.ActivityEvent]struct{}
+	mu    sync.RWMutex
+	subs  map[chan *agentpb.ActivityEvent]struct{}
+	usage UsageRecorder
 
-	MessagesRouted        atomic.Int64
+	MessagesRouted         atomic.Int64
 	MessagesDeliveredLocal atomic.Int64
-	MessagesSentRemote    atomic.Int64
+	MessagesSentRemote     atomic.Int64
 	MessagesReceivedRemote atomic.Int64
-	SessionsOpened        atomic.Int64
-	SessionsResolved      atomic.Int64
-	RoomsCreated          atomic.Int64
-	RoomMessagesPosted    atomic.Int64
-	RoomMembersJoined     atomic.Int64
-	RoomMembersLeft       atomic.Int64
-	RoomsClosed           atomic.Int64
+	SessionsOpened         atomic.Int64
+	SessionsResolved       atomic.Int64
+	RoomsCreated           atomic.Int64
+	RoomMessagesPosted     atomic.Int64
+	RoomMembersJoined      atomic.Int64
+	RoomMembersLeft        atomic.Int64
+	RoomsClosed            atomic.Int64
 }
 
 // NewActivityBus creates a new activity bus.
@@ -33,6 +38,12 @@ func NewActivityBus() *ActivityBus {
 	return &ActivityBus{
 		subs: make(map[chan *agentpb.ActivityEvent]struct{}),
 	}
+}
+
+func (b *ActivityBus) SetUsageRecorder(recorder UsageRecorder) {
+	b.mu.Lock()
+	b.usage = recorder
+	b.mu.Unlock()
 }
 
 // Subscribe returns a channel that receives activity events.
@@ -66,20 +77,29 @@ func (b *ActivityBus) Emit(event *agentpb.ActivityEvent) {
 	}
 }
 
+func (b *ActivityBus) recordUsage(metric agentpb.UsageMetric) {
+	b.mu.RLock()
+	usage := b.usage
+	b.mu.RUnlock()
+	if usage != nil {
+		_ = usage.RecordUsage(metric, time.Now(), 1)
+	}
+}
+
 // Counters returns a snapshot of all atomic counters.
 func (b *ActivityBus) Counters() *agentpb.Counters {
 	return &agentpb.Counters{
-		MessagesRouted:        b.MessagesRouted.Load(),
+		MessagesRouted:         b.MessagesRouted.Load(),
 		MessagesDeliveredLocal: b.MessagesDeliveredLocal.Load(),
-		MessagesSentRemote:    b.MessagesSentRemote.Load(),
+		MessagesSentRemote:     b.MessagesSentRemote.Load(),
 		MessagesReceivedRemote: b.MessagesReceivedRemote.Load(),
-		SessionsOpened:        b.SessionsOpened.Load(),
-		SessionsResolved:      b.SessionsResolved.Load(),
-		RoomsCreated:          b.RoomsCreated.Load(),
-		RoomMessagesPosted:    b.RoomMessagesPosted.Load(),
-		RoomMembersJoined:     b.RoomMembersJoined.Load(),
-		RoomMembersLeft:       b.RoomMembersLeft.Load(),
-		RoomsClosed:           b.RoomsClosed.Load(),
+		SessionsOpened:         b.SessionsOpened.Load(),
+		SessionsResolved:       b.SessionsResolved.Load(),
+		RoomsCreated:           b.RoomsCreated.Load(),
+		RoomMessagesPosted:     b.RoomMessagesPosted.Load(),
+		RoomMembersJoined:      b.RoomMembersJoined.Load(),
+		RoomMembersLeft:        b.RoomMembersLeft.Load(),
+		RoomsClosed:            b.RoomsClosed.Load(),
 	}
 }
 
@@ -87,6 +107,7 @@ func (b *ActivityBus) Counters() *agentpb.Counters {
 
 func (b *ActivityBus) EmitMessageRouted(sessionID, from, to string, remote bool, traceID, messageID string) {
 	b.MessagesRouted.Add(1)
+	b.recordUsage(agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED)
 	if remote {
 		b.MessagesSentRemote.Add(1)
 	} else {
@@ -109,6 +130,7 @@ func (b *ActivityBus) EmitMessageRouted(sessionID, from, to string, remote bool,
 
 func (b *ActivityBus) EmitSessionOpened(sessionID, from, to string) {
 	b.SessionsOpened.Add(1)
+	b.recordUsage(agentpb.UsageMetric_USAGE_METRIC_SESSIONS_OPENED)
 	b.Emit(&agentpb.ActivityEvent{
 		Timestamp: timestamppb.Now(),
 		Event: &agentpb.ActivityEvent_SessionOpened{
@@ -147,6 +169,7 @@ func (b *ActivityBus) EmitHandleRegistered(handle string) {
 
 func (b *ActivityBus) EmitRoomCreated(roomID, title, createdBy string, members []string) {
 	b.RoomsCreated.Add(1)
+	b.recordUsage(agentpb.UsageMetric_USAGE_METRIC_ROOMS_CREATED)
 	b.Emit(&agentpb.ActivityEvent{
 		Timestamp: timestamppb.Now(),
 		Event: &agentpb.ActivityEvent_RoomCreated{
@@ -174,6 +197,7 @@ func (b *ActivityBus) EmitRoomMessagePosted(
 	round uint32,
 ) {
 	b.RoomMessagesPosted.Add(1)
+	b.recordUsage(agentpb.UsageMetric_USAGE_METRIC_ROOM_MESSAGES_POSTED)
 	b.Emit(&agentpb.ActivityEvent{
 		Timestamp: timestamppb.Now(),
 		Event: &agentpb.ActivityEvent_RoomMessagePosted{

@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
+	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
 	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 	"github.com/alexanderfrey/tailbus/internal/session"
 	bolt "go.etcd.io/bbolt"
@@ -14,10 +16,12 @@ import (
 )
 
 var (
-	bucketPending  = []byte("pending_messages")
-	bucketSessions = []byte("sessions")
-	bucketRooms    = []byte("rooms")
-	bucketRoomLogs = []byte("room_events")
+	bucketPending     = []byte("pending_messages")
+	bucketSessions    = []byte("sessions")
+	bucketRooms       = []byte("rooms")
+	bucketRoomLogs    = []byte("room_events")
+	bucketUsageDaily  = []byte("usage_daily")
+	bucketUsageHourly = []byte("usage_hourly")
 )
 
 // MessageStore provides durable storage for pending messages and sessions
@@ -67,6 +71,12 @@ func NewMessageStore(path string, logger *slog.Logger) (*MessageStore, error) {
 			return err
 		}
 		if _, err := tx.CreateBucketIfNotExists(bucketRoomLogs); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists(bucketUsageDaily); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists(bucketUsageHourly); err != nil {
 			return err
 		}
 		return nil
@@ -331,6 +341,108 @@ func countKeys(b *bolt.Bucket) int {
 		count++
 	}
 	return count
+}
+
+func usageMetricBucketKey(metric agentpb.UsageMetric) []byte {
+	return []byte(fmt.Sprintf("%02d", int32(metric)))
+}
+
+func usageTimeBucketKey(unix int64) []byte {
+	return []byte(fmt.Sprintf("%020d", unix))
+}
+
+func usageBucketStart(ts time.Time, hourly bool) time.Time {
+	ts = ts.UTC()
+	if hourly {
+		return time.Date(ts.Year(), ts.Month(), ts.Day(), ts.Hour(), 0, 0, 0, time.UTC)
+	}
+	return time.Date(ts.Year(), ts.Month(), ts.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func incrementUsageBucket(root *bolt.Bucket, metric agentpb.UsageMetric, bucketStartUnix, delta int64) error {
+	metricBucket, err := root.CreateBucketIfNotExists(usageMetricBucketKey(metric))
+	if err != nil {
+		return err
+	}
+	key := usageTimeBucketKey(bucketStartUnix)
+	current := int64(0)
+	if raw := metricBucket.Get(key); raw != nil {
+		current, err = strconv.ParseInt(string(raw), 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse usage bucket %q: %w", string(key), err)
+		}
+	}
+	return metricBucket.Put(key, []byte(strconv.FormatInt(current+delta, 10)))
+}
+
+func (ms *MessageStore) RecordUsage(metric agentpb.UsageMetric, at time.Time, count int64) error {
+	if metric == agentpb.UsageMetric_USAGE_METRIC_UNSPECIFIED || count == 0 {
+		return nil
+	}
+	dayStart := usageBucketStart(at, false).Unix()
+	hourStart := usageBucketStart(at, true).Unix()
+	return ms.db.Update(func(tx *bolt.Tx) error {
+		if err := incrementUsageBucket(tx.Bucket(bucketUsageDaily), metric, dayStart, count); err != nil {
+			return err
+		}
+		if err := incrementUsageBucket(tx.Bucket(bucketUsageHourly), metric, hourStart, count); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func usageMetricsInOrder() []agentpb.UsageMetric {
+	return []agentpb.UsageMetric{
+		agentpb.UsageMetric_USAGE_METRIC_MESSAGES_ROUTED,
+		agentpb.UsageMetric_USAGE_METRIC_SESSIONS_OPENED,
+		agentpb.UsageMetric_USAGE_METRIC_ROOM_MESSAGES_POSTED,
+		agentpb.UsageMetric_USAGE_METRIC_ROOMS_CREATED,
+	}
+}
+
+func loadUsageMetricHistory(root *bolt.Bucket, metric agentpb.UsageMetric) (*agentpb.UsageMetricHistory, error) {
+	history := &agentpb.UsageMetricHistory{Metric: metric}
+	if root == nil {
+		return history, nil
+	}
+	metricBucket := root.Bucket(usageMetricBucketKey(metric))
+	if metricBucket == nil {
+		return history, nil
+	}
+	err := metricBucket.ForEach(func(k, v []byte) error {
+		startUnix, err := strconv.ParseInt(string(k), 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse usage key %q: %w", string(k), err)
+		}
+		count, err := strconv.ParseInt(string(v), 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse usage value %q: %w", string(v), err)
+		}
+		history.DailyBuckets = append(history.DailyBuckets, &agentpb.UsageBucket{
+			BucketStartUnix: startUnix,
+			Count:           count,
+		})
+		history.Total += count
+		return nil
+	})
+	return history, err
+}
+
+func (ms *MessageStore) LoadUsageHistory() (*agentpb.UsageHistory, error) {
+	result := &agentpb.UsageHistory{}
+	err := ms.db.View(func(tx *bolt.Tx) error {
+		root := tx.Bucket(bucketUsageDaily)
+		for _, metric := range usageMetricsInOrder() {
+			history, err := loadUsageMetricHistory(root, metric)
+			if err != nil {
+				return err
+			}
+			result.Metrics = append(result.Metrics, history)
+		}
+		return nil
+	})
+	return result, err
 }
 
 // ReplayRoomEvents returns retained room events with sequence greater than sinceSeq.
