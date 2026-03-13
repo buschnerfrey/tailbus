@@ -1,4 +1,4 @@
-# Tailbus Docker Compose — Full mesh with MCP gateway + web UI
+# Tailbus Docker Compose — local mesh with MCP gateway + web UI
 #
 # Usage:
 #   docker compose up --build
@@ -7,7 +7,7 @@
 #   - Coordination server (discovery + peer map)
 #   - Two daemon nodes with P2P connectivity
 #   - MCP gateway + web chat UI on daemon1 (http://localhost:8080)
-#   - Four example Python agents (calculator, echo, orchestrator, LLM assistant)
+#   - Four example Python agents (researcher, critic, writer, echo)
 #
 # Open http://localhost:8080 in your browser for the chat UI.
 #
@@ -18,8 +18,8 @@
 #   # Call the echo agent
 #   curl -s localhost:8080/mcp -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello world"}}}' | jq
 #
-#   # Call the calculator
-#   curl -s localhost:8080/mcp -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"calculator.add","arguments":{"a":2,"b":3}}}' | jq
+#   # Ask the researcher to investigate a topic
+#   curl -s localhost:8080/mcp -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"researcher","arguments":{"message":"Summarize Tailbus in 3 bullets."}}}' | jq
 
 services:
   # --- Coordination server ---
@@ -38,7 +38,7 @@ services:
       timeout: 2s
       retries: 10
 
-  # --- Daemon 1 (with MCP gateway + calculator + orchestrator agents) ---
+  # --- Daemon 1 (with MCP gateway + researcher + critic agents) ---
   daemon1:
     build:
       context: .
@@ -50,7 +50,7 @@ services:
       - daemon1-data:/data
       - daemon1-sock:/var/run/tailbus
       - ./sdk:/sdk:ro
-      - ./examples/docker:/agents:ro
+      - ./examples/multi-machine:/agents:ro
     depends_on:
       coord:
         condition: service_healthy
@@ -75,41 +75,43 @@ services:
       timeout: 2s
       retries: 10
 
-  # Calculator agent on daemon1
-  calculator:
+  # Researcher agent on daemon1
+  researcher:
     build:
       context: .
       target: daemon
     volumes:
       - daemon1-sock:/var/run/tailbus
       - ./sdk:/sdk:ro
-      - ./examples/docker:/agents:ro
+      - ./examples/multi-machine:/agents:ro
     depends_on:
       daemon1:
         condition: service_healthy
-    entrypoint: ["python3", "/agents/calculator_agent.py"]
+    entrypoint: ["python3", "/agents/researcher_agent.py"]
     environment:
       - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
+      - LLM_BASE_URL=http://host.docker.internal:1234/v1
     restart: on-failure
 
-  # Orchestrator agent on daemon1
-  orchestrator:
+  # Critic agent on daemon1
+  critic:
     build:
       context: .
       target: daemon
     volumes:
       - daemon1-sock:/var/run/tailbus
       - ./sdk:/sdk:ro
-      - ./examples/docker:/agents:ro
+      - ./examples/multi-machine:/agents:ro
     depends_on:
       daemon1:
         condition: service_healthy
-    entrypoint: ["python3", "/agents/orchestrator_agent.py"]
+    entrypoint: ["python3", "/agents/critic_agent.py"]
     environment:
       - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
+      - LLM_BASE_URL=http://host.docker.internal:1234/v1
     restart: on-failure
 
-  # --- Daemon 2 (with echo agent) ---
+  # --- Daemon 2 (with writer + echo agents) ---
   daemon2:
     build:
       context: .
@@ -118,7 +120,7 @@ services:
       - daemon2-data:/data
       - daemon2-sock:/var/run/tailbus
       - ./sdk:/sdk:ro
-      - ./examples/docker:/agents:ro
+      - ./examples/multi-machine:/agents:ro
     depends_on:
       coord:
         condition: service_healthy
@@ -141,19 +143,19 @@ services:
       timeout: 2s
       retries: 10
 
-  # LLM assistant agent on daemon1 (connects to LM Studio on host)
-  assistant:
+  # Writer agent on daemon2
+  writer:
     build:
       context: .
       target: daemon
     volumes:
-      - daemon1-sock:/var/run/tailbus
+      - daemon2-sock:/var/run/tailbus
       - ./sdk:/sdk:ro
-      - ./examples/docker:/agents:ro
+      - ./examples/multi-machine:/agents:ro
     depends_on:
-      daemon1:
+      daemon2:
         condition: service_healthy
-    entrypoint: ["python3", "/agents/llm_agent.py"]
+    entrypoint: ["python3", "/agents/writer_agent.py"]
     environment:
       - TAILBUS_SOCKET=/var/run/tailbus/tailbusd.sock
       - LLM_BASE_URL=http://host.docker.internal:1234/v1
@@ -167,7 +169,7 @@ services:
     volumes:
       - daemon2-sock:/var/run/tailbus
       - ./sdk:/sdk:ro
-      - ./examples/docker:/agents:ro
+      - ./examples/multi-machine:/agents:ro
     depends_on:
       daemon2:
         condition: service_healthy

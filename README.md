@@ -213,7 +213,7 @@ The mesh resolves each @-handle, auto-opens sessions to `finance` and `legal` �
 docker compose up --build
 ```
 
-Starts: coord + 2 daemons + MCP gateway with web UI (port 8080) + 4 example agents (calculator, echo, orchestrator, LLM assistant).
+Starts: coord + 2 daemons + MCP gateway with web UI (port 8080) + 4 example agents (`researcher`, `critic`, `writer`, `echo`).
 
 Open http://localhost:8080 for the chat UI. Test with curl:
 
@@ -222,31 +222,20 @@ Open http://localhost:8080 for the chat UI. Test with curl:
 curl -s localhost:8080/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | jq '.result.tools[].name'
 
-# Call the calculator
+# Ask the researcher to investigate a topic
 curl -s localhost:8080/mcp \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"calculator.add","arguments":{"a":2,"b":3}}}' | jq
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"researcher","arguments":{"message":"Summarize Tailbus in 3 bullets."}}}' | jq
 
 # Cross-node P2P
 curl -s localhost:8080/mcp \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello tailbus"}}}' | jq
 ```
 
-### Multi-Agent LLM Collaboration
+### Cross-Machine Mesh
 
-Three LLM-powered agents collaborating through the mesh — all using a single local [LM Studio](https://lmstudio.ai/) instance:
+The repo's cross-machine example is now [`examples/multi-machine`](examples/multi-machine/README.md). It runs `researcher` and `critic` on one machine and `writer` plus `echo` on another, with the Tailbus mesh spanning both hosts.
 
-| Agent | Role |
-|-------|------|
-| **researcher** | Investigates topics, orchestrates the pipeline |
-| **critic** | Reviews findings for accuracy, completeness, bias |
-| **writer** | Synthesizes research + critique into polished output |
-
-```bash
-cd examples/multi-agent
-docker compose up --build
-```
-
-Open http://localhost:8080, click **researcher**, and ask it to investigate any topic. The pipeline runs: researcher → critic → writer, each as a separate agent on the mesh.
+See [`examples/multi-machine/README.md`](examples/multi-machine/README.md) for the two-machine setup and Docker Compose files.
 
 ### Pair Solver (Shared Rooms)
 
@@ -265,18 +254,6 @@ tailbus -socket /tmp/pairsolver-orchestrator.sock dashboard
 ```
 
 See [`examples/pair-solver/README.md`](examples/pair-solver/README.md) for the full flow.
-
-### 3-Machine Demo
-
-A travel agency scenario across 3 physical machines:
-
-| Machine | Agents |
-|---------|--------|
-| A (coord + daemon) | `concierge` (orchestrator) |
-| B (daemon) | `flights`, `hotels` (booking) |
-| C (daemon) | `weather`, `currency` (data) |
-
-See [`examples/demo/README.md`](examples/demo/README.md) for the full walkthrough.
 
 ---
 
@@ -483,7 +460,7 @@ internal/
 
 ## Configuration
 
-All binaries accept TOML config files via `-config`. Example files in `examples/dev/`.
+All binaries accept TOML config files via `-config`. The repo's maintained runnable configs are currently the Docker Compose examples under [`examples/multi-machine/`](examples/multi-machine/README.md); the source examples below use flags directly so they keep working even when example config files change.
 
 <details>
 <summary><strong>Coordination server (tailbus-coord)</strong></summary>
@@ -612,11 +589,11 @@ The repo's `fly.toml` is pre-configured:
 make build          # produces bin/tailbus-coord, bin/tailbusd, bin/tailbus, bin/tailbus-relay
 
 # Start coord
-./bin/tailbus-coord -config examples/dev/coord.toml
+./bin/tailbus-coord -data-dir /tmp/tailbus-coord -listen :8443 -health-addr :8081
 
 # Start daemons (separate terminals)
-./bin/tailbusd -config examples/dev/daemon1.toml
-./bin/tailbusd -config examples/dev/daemon2.toml
+./bin/tailbusd -node-id node-1 -coord 127.0.0.1:8443 -advertise 127.0.0.1:9443 -listen :9443 -socket /tmp/tailbusd-1.sock
+./bin/tailbusd -node-id node-2 -coord 127.0.0.1:8443 -advertise 127.0.0.1:9444 -listen :9444 -socket /tmp/tailbusd-2.sock
 
 # Register agents, exchange messages
 ./bin/tailbus -socket /tmp/tailbusd-1.sock register marketing
