@@ -2,38 +2,26 @@
   <h1 align="center">tailbus</h1>
   <p align="center">
     <strong>Slack for AI agents. Rooms, @-mentions, threads, and discovery — across any machine.</strong>
-    <br />
-    Your agents get handles, join rooms, @-mention each other, and collaborate in threads —
-    across languages, machines, and teams. No infrastructure required.
-  </p>
-  <p align="center">
-    <a href="https://github.com/alexanderfrey/tailbus/releases"><img src="https://img.shields.io/github/v/release/alexanderfrey/tailbus?style=flat-square&color=blue" alt="Release" /></a>
-    <a href="https://github.com/alexanderfrey/tailbus/actions"><img src="https://img.shields.io/github/actions/workflow/status/alexanderfrey/tailbus/release.yml?style=flat-square" alt="Build" /></a>
-    <a href="#"><img src="https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey?style=flat-square" alt="Platform" /></a>
-    <a href="#"><img src="https://img.shields.io/badge/protocol-A2A%20%2B%20MCP-blueviolet?style=flat-square" alt="Protocol" /></a>
   </p>
   <p align="center">
     <a href="https://tailbus.co">Website</a> · <a href="https://tailbus.co/getting-started">Getting Started</a> · <a href="https://tailbus.co/releases">Releases</a>
   </p>
 </p>
 
----
+You have agents. They run on your laptop, a cloud VM, a home server. Getting them to find each other, authenticate, and hold a conversation across those boundaries means solving networking, discovery, identity, and session management yourself — or duct-taping together four different tools. **Tailbus handles all of it.**
 
-```
-            ┌──────────── #incident-room ────────────┐
-            │                                         │
-            │  @support    "checkout is failing"      │
-            │  @ops-logs   "found 502s at 14:32"      │
-            │  @metrics    "p99 latency spike"        │
-            │  @billing    "account OK, not billing"  │
-            │  @statuspage "drafting customer update"  │
-            │                                         │
-            └─────────────────────────────────────────┘
-                     ▲           ▲           ▲
-                office-mac    cloud-vm    home-server
-```
+<p align="center">
+  <img src="doc/demo.gif" alt="tailbus demo — 5 agents across 5 nodes analyzing a codebase" width="720" />
+</p>
 
-**Tailbus is Slack for AI agents.** Every agent gets a handle, joins rooms, uses @-mentions to recruit other agents mid-conversation, and collaborates in structured threads that open, exchange messages, and resolve. Agents can be Python scripts, Go services, MCP tools, or LLM pipelines — on the same machine or across your whole network. Install the daemon, write 10 lines of Python, and your agent is live on the mesh.
+Every agent gets a handle, joins rooms, uses @-mentions to recruit other agents mid-conversation, and collaborates in structured threads. Agents can be Python scripts, Go services, MCP tools, or LLM pipelines — on the same machine or across your whole network. Install the daemon, write 10 lines of Python, and your agent is live on the mesh.
+
+<p align="center">
+  <a href="https://github.com/alexanderfrey/tailbus/releases"><img src="https://img.shields.io/github/v/release/alexanderfrey/tailbus?style=flat-square&color=blue" alt="Release" /></a>
+  <a href="https://github.com/alexanderfrey/tailbus/actions"><img src="https://img.shields.io/github/actions/workflow/status/alexanderfrey/tailbus/release.yml?style=flat-square" alt="Build" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/platform-linux%20%7C%20macOS-lightgrey?style=flat-square" alt="Platform" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/protocol-A2A%20%2B%20MCP-blueviolet?style=flat-square" alt="Protocol" /></a>
+</p>
 
 ## Quick Start
 
@@ -70,6 +58,22 @@ That's it — `finance` is now live. Any agent on your mesh can @-mention it, in
 
 ---
 
+## Connect to Claude or Cursor (30 seconds)
+
+If you're already running `tailbusd`, add one line to your MCP config:
+
+```json
+{
+  "mcpServers": {
+    "tailbus": { "url": "http://localhost:1423/mcp" }
+  }
+}
+```
+
+Every agent on your mesh becomes a tool Claude can call — including agents on other machines. No agent code required. No SDK. Just the daemon and one config line.
+
+---
+
 ## What agents can do
 
 **Collaborate in rooms** — Create a shared space, invite specialists, and let them work together with a replayable transcript. Like a Slack channel for a specific task.
@@ -94,6 +98,20 @@ That's it — `finance` is now live. Any agent on your mesh can @-mention it, in
 
 ---
 
+## Why not just...
+
+**...HTTP/REST?** You'd need service discovery, auth, NAT traversal, session state, and retry logic. Tailbus bundles all of that. Agents register a name and talk — no endpoints, no port forwarding, no load balancers.
+
+**...a message queue (Kafka, RabbitMQ)?** Those are data pipelines. Tailbus is a control plane with structured sessions, @-mention routing, and capability discovery. Different tool for a different job.
+
+**...running everything in one process?** Works until your agents need different machines, different languages, or different teams. Tailbus is for when they outgrow a single runtime.
+
+**...Tailscale?** Tailscale solves networking. Tailbus adds the agent layer on top: handles, rooms, sessions, discovery, MCP. They're complementary — you could run tailbus over a Tailscale network.
+
+**...MCP alone?** MCP is a tool-call protocol (request/response). It doesn't give you multi-turn sessions, rooms, @-mention routing, or P2P connectivity. Tailbus adds those and exposes the result *through* MCP.
+
+---
+
 ## Features
 
 ### Collaboration
@@ -103,24 +121,8 @@ That's it — `finance` is now live. Any agent on your mesh can @-mention it, in
 - **Threads** — structured sessions that open, exchange messages across multiple turns, and resolve when done; not fire-and-forget API calls
 - **Handles** — every agent gets a name like `marketing` or `finance` and messages by name, not by IP, endpoint, or machine
 - **Discovery** — agents find each other by capabilities, domains, or tags without knowing handle names in advance; ranked matching returns the best fits
-- **MCP gateway** — every daemon includes a built-in [MCP](https://modelcontextprotocol.io/) gateway; add one line to your Claude or Cursor config and every handle becomes a callable tool, including agents on other machines
+- **MCP gateway** — every daemon includes a built-in [MCP](https://modelcontextprotocol.io/) gateway; handles become tools, commands become separate tools (e.g., `finance.budget`, `calculator.add`); see [Connect to Claude or Cursor](#connect-to-claude-or-cursor-30-seconds) above
 - **Any language, any runtime** — Python scripts, Go services, MCP tools, CLI bridges, and LLM pipelines all participate on the same mesh
-
-### MCP Gateway
-
-Add one line to your Claude or Cursor config:
-
-```json
-{
-  "mcpServers": {
-    "tailbus": {
-      "url": "http://localhost:1423/mcp"
-    }
-  }
-}
-```
-
-Every registered handle becomes a callable tool. If your agent declares commands in its manifest, each command becomes a separate tool (e.g., `finance.budget`, `calculator.add`). Claude and Cursor can invoke agents on your mesh — including agents on other machines — through one endpoint.
 
 ### Infrastructure (why it just works)
 
@@ -215,6 +217,10 @@ docker compose up --build
 ```
 
 Starts: coord + 2 daemons + MCP gateway with web UI (port 8080) + 4 example agents (`researcher`, `critic`, `writer`, `echo`).
+
+<p align="center">
+  <img src="doc/web-ui.png" alt="tailbus web chat UI" width="720" />
+</p>
 
 Open http://localhost:8080 for the chat UI. Test with curl:
 
