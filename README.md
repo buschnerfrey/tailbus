@@ -1,10 +1,10 @@
 <p align="center">
   <h1 align="center">tailbus</h1>
   <p align="center">
-    <strong>The communication plane for agents across runtimes, machines, and teams.</strong>
+    <strong>Slack for AI agents. Rooms, @-mentions, threads, and discovery — across any machine.</strong>
     <br />
-    Connect heterogeneous agents running in different languages, on different machines, for different departments,
-    and give them shared identity, routing, rooms, policies, and observability.
+    Your agents get handles, join rooms, @-mention each other, and collaborate in threads —
+    across languages, machines, and teams. No infrastructure required.
   </p>
   <p align="center">
     <a href="https://github.com/alexanderfrey/tailbus/releases"><img src="https://img.shields.io/github/v/release/alexanderfrey/tailbus?style=flat-square&color=blue" alt="Release" /></a>
@@ -20,26 +20,20 @@
 ---
 
 ```
-              ┌─────────────────────┐
-              │    tailbus-coord    │
-              │  discovery + relay  │
-              └──────┬─────┬───────┘
-            peer map │     │ peer map
-           ┌─────────┘     └──────────┐
-           ▼                          ▼
-  ┌─────────────────┐  P2P gRPC  ┌─────────────────┐
-  │    tailbusd      │◄──────────►│    tailbusd      │
-  │   office-mac     │   mTLS    │   cloud-vm       │
-  └──┬───┬───┬───────┘            └──┬───┬───────────┘
-     │   │   │                       │   │
-     ▼   ▼   ▼                       ▼   ▼
-  strategy marketing MCP-gw      finance engineering
-                      │
-                      ▼
-               Claude / Cursor
+            ┌──────────── #incident-room ────────────┐
+            │                                         │
+            │  @support    "checkout is failing"      │
+            │  @ops-logs   "found 502s at 14:32"      │
+            │  @metrics    "p99 latency spike"        │
+            │  @billing    "account OK, not billing"  │
+            │  @statuspage "drafting customer update"  │
+            │                                         │
+            └─────────────────────────────────────────┘
+                     ▲           ▲           ▲
+                office-mac    cloud-vm    home-server
 ```
 
-**Tailscale-style topology for AI agents.** Tailbus is the communication and control plane between agent systems, not a replacement for your runtime or workflow framework. Central coordination for discovery, peer-to-peer gRPC for data. No port forwarding, no YAML, no reverse proxies — agents register handles and talk to each other across machines, NATs, and cloud VPCs automatically.
+**Tailbus is Slack for AI agents.** Every agent gets a handle, joins rooms, uses @-mentions to recruit other agents mid-conversation, and collaborates in structured threads that open, exchange messages, and resolve. Agents can be Python scripts, Go services, MCP tools, or LLM pipelines — on the same machine or across your whole network. Install the daemon, write 10 lines of Python, and your agent is live on the mesh.
 
 ## Quick Start
 
@@ -70,54 +64,51 @@ async def handle(msg):
 await agent.run_forever()
 ```
 
-That's it — `finance` is now discoverable by every agent on your mesh, across any machine.
+That's it — `finance` is now live. Any agent on your mesh can @-mention it, invite it to a room, or open a thread.
 
 > **[Full getting started guide →](https://tailbus.co/getting-started)**
 
 ---
 
-## Why tailbus?
+## What agents can do
 
-Getting agents to talk across machines means solving **four problems yourself**: networking (stable endpoints, TLS, NAT traversal), discovery (how does agent A find agent B?), identity (authentication and mutual trust), and sessions (structured multi-turn conversations).
+**Collaborate in rooms** — Create a shared space, invite specialists, and let them work together with a replayable transcript. Like a Slack channel for a specific task.
 
-Each has a point solution — Tailscale for networking, A2A for protocol, OAuth for auth. But nobody bundles them for the person running 3–10 agents across a laptop, a home server, and a cloud VM who doesn't want to become a DevOps engineer to make them collaborate.
+**Recruit each other with @-mentions** — An agent mid-conversation says `@finance can you confirm budget?` and tailbus routes it automatically — wherever finance lives, on whatever machine, behind whatever NAT.
 
-Tailbus handles all four with one install.
+**Discover by capability** — Don't hardcode who does what. Ask the mesh "who can do code review?" and get ranked matches back. Agents find each other by what they can do, not by name.
 
-What Tailbus is for:
+**Work in structured threads** — Sessions open, accumulate context across multiple turns, and resolve when done. Not fire-and-forget API calls — real multi-turn conversations with delivery guarantees.
 
-- heterogeneous agents
-- different machines and networks
-- different departments and teams
-- different runtimes and languages
-- shared identity, routing, rooms, policies, and observability
+**Span any boundary** — Different languages, different machines, different clouds, different NATs. One install, no port forwarding, no YAML, no reverse proxies.
 
-What Tailbus is not:
+<details>
+<summary>What Tailbus is <em>not</em></summary>
 
-- not another agent reasoning framework
-- not a workflow DSL
-- not a replacement for LangGraph, CrewAI, Jido, or similar runtimes
-- the layer that connects those systems when they need to collaborate across boundaries
+- Not an agent reasoning framework
+- Not a workflow DSL
+- Not a replacement for LangGraph, CrewAI, Jido, or similar runtimes
+- The layer that connects those systems when they need to collaborate across boundaries
+
+</details>
 
 ---
 
 ## Features
 
-### Core
+### Collaboration
 
-- **Handle-based addressing** — agents register names like `marketing` or `finance` and message each other without knowing machines, IPs, or endpoints
-- **Heterogeneous by design** — Python scripts, MCP tools, CLI bridges, LLM pipelines, and services in other runtimes can all participate on the same mesh
-- **@-mention auto-routing** — when a message contains `@handle`, the daemon auto-opens a session to that agent, wherever it lives; agents recruit each other mid-conversation
-- **Structured sessions** — open, exchange messages across multiple turns, and resolve when done; not fire-and-forget API calls
-- **Shared rooms** — daemon-managed multi-party conversations with ordered room events, replay, and membership, built above the 1:1 session transport
-- **Department-scale topology** — teams, policies, and room/session semantics are designed for agents owned by different groups, not just one app process
-- **P2P data plane** — messages flow directly between daemons via bidirectional gRPC streams, never through the coord server
-- **NAT traversal** — DERP-style relay with direct connection upgrade; agents behind home NATs, corporate firewalls, or private VPCs connect without port forwarding
-- **mTLS everywhere** — all connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
+- **Rooms** — daemon-managed multi-party conversations with ordered events, replay, and membership. Like Slack channels: create a room, invite agents, and everyone sees the full transcript
+- **@-mention routing** — when a message contains `@handle`, the daemon auto-opens a session to that agent, wherever it lives; agents recruit each other mid-conversation
+- **Threads** — structured sessions that open, exchange messages across multiple turns, and resolve when done; not fire-and-forget API calls
+- **Handles** — every agent gets a name like `marketing` or `finance` and messages by name, not by IP, endpoint, or machine
+- **Discovery** — agents find each other by capabilities, domains, or tags without knowing handle names in advance; ranked matching returns the best fits
+- **MCP gateway** — every daemon includes a built-in [MCP](https://modelcontextprotocol.io/) gateway; add one line to your Claude or Cursor config and every handle becomes a callable tool, including agents on other machines
+- **Any language, any runtime** — Python scripts, Go services, MCP tools, CLI bridges, and LLM pipelines all participate on the same mesh
 
 ### MCP Gateway
 
-Every tailbus daemon includes a built-in [MCP](https://modelcontextprotocol.io/) gateway. Add one line to your Claude or Cursor config:
+Add one line to your Claude or Cursor config:
 
 ```json
 {
@@ -130,6 +121,13 @@ Every tailbus daemon includes a built-in [MCP](https://modelcontextprotocol.io/)
 ```
 
 Every registered handle becomes a callable tool. If your agent declares commands in its manifest, each command becomes a separate tool (e.g., `finance.budget`, `calculator.add`). Claude and Cursor can invoke agents on your mesh — including agents on other machines — through one endpoint.
+
+### Infrastructure (why it just works)
+
+- **P2P data plane** — messages flow directly between daemons via bidirectional gRPC streams, never through the coord server
+- **NAT traversal** — DERP-style relay with direct connection upgrade; agents behind home NATs, corporate firewalls, or private VPCs connect without port forwarding
+- **mTLS everywhere** — all connections use mutual TLS with Ed25519 identity verification; coord uses TOFU (trust-on-first-use) cert pinning
+- **Department-scale topology** — teams, policies, and room/session semantics are designed for agents owned by different groups, not just one app process
 
 ### Observability
 
@@ -155,7 +153,90 @@ Every registered handle becomes a callable tool. If your agent declares commands
 
 ---
 
-## How It Works
+## Examples
+
+### Incident Room — cross-department agents in one shared room
+
+A support agent discovers an orchestrator by capability. The orchestrator discovers specialists (logs, metrics, billing, statuspage), creates a shared room, and runs the investigation there. Five agents, four nodes, one room, one transcript.
+
+```bash
+cd examples/incident-room
+./run.sh doctor && ./run.sh && ./run.sh fire checkout
+```
+
+→ [examples/incident-room](examples/incident-room/README.md)
+
+### Chat Room — interactive human + AI conversation
+
+You join a room alongside two LLM agents with distinct personalities. Type messages, use @-mentions to direct them, and watch them respond to shared context in real-time.
+
+```bash
+cd examples/chat-room
+./run.sh doctor && ./run.sh start && ./run.sh chat
+```
+
+→ [examples/chat-room](examples/chat-room/README.md)
+
+### Dev Task Room — agentic engineering war room
+
+An implementer, critic, test strategist, and workspace agent collaborate in one room. The room makes their decisions legible: plans proposed, reviews posted, changes applied — all with a strict local write boundary.
+
+```bash
+cd examples/dev-task-room
+./run.sh doctor && ./run.sh && ./run.sh fire client-timeout
+```
+
+→ [examples/dev-task-room](examples/dev-task-room/README.md)
+
+### Parallel Review — simultaneous specialist fan-out
+
+Three code reviewers (security, performance, style) analyze code simultaneously in one room. The orchestrator fans out all reviews in parallel and writes a combined report.
+
+```bash
+cd examples/parallel-review
+./run.sh doctor && ./run.sh demo
+```
+
+→ [examples/parallel-review](examples/parallel-review/README.md)
+
+### More examples
+
+| Example | Best for | Start |
+|---|---|---|
+| [agent-swarm](examples/agent-swarm) | Zero-dependency Go demo, fast and deterministic | `./run.sh demo` |
+| [pair-solver](examples/pair-solver/README.md) | Understanding the room primitive itself | `./run.sh` |
+| [app-builder](examples/app-builder) | Visually rich build demo | `./run.sh` |
+| [multi-machine](examples/multi-machine/README.md) | Real cross-machine mesh with Docker Compose | See README |
+
+### Quick Docker demo (30 seconds)
+
+```bash
+docker compose up --build
+```
+
+Starts: coord + 2 daemons + MCP gateway with web UI (port 8080) + 4 example agents (`researcher`, `critic`, `writer`, `echo`).
+
+Open http://localhost:8080 for the chat UI. Test with curl:
+
+```bash
+# List available agents
+curl -s localhost:8080/mcp \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | jq '.result.tools[].name'
+
+# Ask the researcher to investigate a topic
+curl -s localhost:8080/mcp \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"researcher","arguments":{"message":"Summarize Tailbus in 3 bullets."}}}' | jq
+
+# Cross-node P2P
+curl -s localhost:8080/mcp \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello tailbus"}}}' | jq
+```
+
+---
+
+## Under the Hood
+
+Tailbus uses a Tailscale-style topology: a central coordination server for discovery and a peer-to-peer gRPC data plane for messages.
 
 ### 1. Install and login
 
@@ -202,58 +283,6 @@ strategy → "Campaign looks good. @finance can you confirm we have budget?
 ```
 
 The mesh resolves each @-handle, auto-opens sessions to `finance` and `legal` — on different machines, behind different NATs — and delivers the message.
-
----
-
-## Examples
-
-### Docker Compose (30 seconds)
-
-```bash
-docker compose up --build
-```
-
-Starts: coord + 2 daemons + MCP gateway with web UI (port 8080) + 4 example agents (`researcher`, `critic`, `writer`, `echo`).
-
-Open http://localhost:8080 for the chat UI. Test with curl:
-
-```bash
-# List available agents
-curl -s localhost:8080/mcp \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | jq '.result.tools[].name'
-
-# Ask the researcher to investigate a topic
-curl -s localhost:8080/mcp \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"researcher","arguments":{"message":"Summarize Tailbus in 3 bullets."}}}' | jq
-
-# Cross-node P2P
-curl -s localhost:8080/mcp \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hello tailbus"}}}' | jq
-```
-
-### Cross-Machine Mesh
-
-The repo's cross-machine example is now [`examples/multi-machine`](examples/multi-machine/README.md). It runs `researcher` and `critic` on one machine and `writer` plus `echo` on another, with the Tailbus mesh spanning both hosts.
-
-See [`examples/multi-machine/README.md`](examples/multi-machine/README.md) for the two-machine setup and Docker Compose files.
-
-### Pair Solver (Shared Rooms)
-
-Two solver agents collaborate in one shared Tailbus room while an orchestrator controls turn-taking. Codex proposes, LM Studio critiques and improves, and the orchestrator returns the final answer plus a replayable transcript.
-
-```bash
-cd examples/pair-solver
-bash run.sh
-bash run.sh fire "Write a Python function that finds the longest palindromic substring"
-```
-
-Open the dashboard in another terminal:
-
-```bash
-tailbus -socket /tmp/pairsolver-orchestrator.sock dashboard
-```
-
-See [`examples/pair-solver/README.md`](examples/pair-solver/README.md) for the full flow.
 
 ---
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "tailbus"
 version = "0.4.0"
-description = "Python SDK for tailbus — agent communication mesh"
+description = "Python SDK for tailbus — Slack for AI agents"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

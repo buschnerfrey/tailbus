@@ -1,4 +1,4 @@
-"""tailbus — Python SDK for the tailbus agent communication mesh.
+"""tailbus — Python SDK for tailbus, Slack for AI agents.
 
 Async usage::
 

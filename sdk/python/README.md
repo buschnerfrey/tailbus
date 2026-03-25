@@ -1,6 +1,6 @@
 # tailbus Python SDK
 
-Python SDK for [tailbus](https://github.com/alexanderfrey/tailbus) — an agent communication mesh.
+Python SDK for [tailbus](https://github.com/alexanderfrey/tailbus) — Slack for AI agents.
 
 ## Install
 
