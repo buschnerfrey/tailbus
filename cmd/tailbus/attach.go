@@ -1,15 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
+	"time"
+
+	agentpb "github.com/alexanderfrey/tailbus/api/agentpb"
+	messagepb "github.com/alexanderfrey/tailbus/api/messagepb"
 )
 
 type stringSliceFlag []string
@@ -89,6 +95,8 @@ func runAttach(client bridgeClient, logger *slog.Logger, args []string) error {
 	description := attachFlags.String("description", "", "service description")
 	version := attachFlags.String("version", "", "service version")
 	cwd := attachFlags.String("cwd", "", "child process working directory")
+	execMode := attachFlags.Bool("exec", false, "exec mode: run command per request, payload becomes argument")
+	execTimeout := attachFlags.Duration("exec-timeout", 30*time.Second, "timeout for each exec invocation")
 
 	var tags stringSliceFlag
 	var capabilities stringSliceFlag
@@ -142,6 +150,11 @@ func runAttach(client bridgeClient, logger *slog.Logger, args []string) error {
 	defer cancel()
 
 	childArgs := attachFlags.Args()
+
+	if *execMode {
+		return runExecAttach(ctx, client, logger, *handle, manifest, joinRooms, childArgs, *cwd, envVars, *execTimeout)
+	}
+
 	cmd := exec.CommandContext(ctx, childArgs[0], childArgs[1:]...)
 	cmd.Stdout = nil
 	cmd.Stderr = os.Stderr
@@ -194,4 +207,132 @@ func runAttach(client bridgeClient, logger *slog.Logger, args []string) error {
 		return childErr
 	}
 	return nil
+}
+
+// runExecAttach registers the handle, subscribes for messages, and for each
+// incoming session_open spawns the command with the payload as an argument.
+// The command's stdout becomes the session response.
+//
+// If any argument is "{}", it is replaced with the payload. Otherwise the
+// payload is appended as the last argument.
+func runExecAttach(
+	ctx context.Context,
+	client bridgeClient,
+	logger *slog.Logger,
+	handle string,
+	manifest *manifestCmd,
+	joinRooms []string,
+	baseArgs []string,
+	cwdPath string,
+	envVars stringSliceFlag,
+	timeout time.Duration,
+) error {
+	// Register.
+	regReq := buildRegisterRequest(inboundCmd{
+		Type:     "register",
+		Handle:   handle,
+		Manifest: manifest,
+	})
+	resp, err := client.Register(ctx, regReq)
+	if err != nil {
+		return fmt.Errorf("register: %w", err)
+	}
+	if !resp.Ok {
+		return fmt.Errorf("register: %s", resp.Error)
+	}
+	logger.Info("registered", "handle", handle, "mode", "exec")
+
+	// Join rooms.
+	for _, roomID := range joinRooms {
+		if _, err := client.JoinRoom(ctx, &agentpb.JoinRoomRequest{RoomId: roomID, Handle: handle}); err != nil {
+			logger.Warn("join room failed", "room", roomID, "error", err)
+		}
+	}
+
+	// Subscribe.
+	stream, err := client.Subscribe(ctx, &agentpb.SubscribeRequest{Handle: handle})
+	if err != nil {
+		return fmt.Errorf("subscribe: %w", err)
+	}
+
+	logger.Info("listening", "handle", handle)
+
+	for {
+		msg, err := stream.Recv()
+		if err != nil {
+			if ctx.Err() != nil || err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("subscribe recv: %w", err)
+		}
+
+		env := msg.Envelope
+		if env == nil || env.Type != messagepb.EnvelopeType_ENVELOPE_TYPE_SESSION_OPEN {
+			continue
+		}
+
+		payload := string(env.Payload)
+		output, execErr := execCommand(ctx, baseArgs, payload, cwdPath, envVars, timeout)
+
+		responsePayload := output
+		if execErr != nil {
+			if len(output) > 0 {
+				responsePayload = fmt.Sprintf("error: %s\n%s", execErr, output)
+			} else {
+				responsePayload = fmt.Sprintf("error: %s", execErr)
+			}
+		}
+
+		if _, err := client.ResolveSession(ctx, &agentpb.ResolveSessionRequest{
+			SessionId:   env.SessionId,
+			FromHandle:  handle,
+			Payload:     []byte(responsePayload),
+			ContentType: "text/plain",
+		}); err != nil {
+			logger.Error("resolve failed", "session", env.SessionId, "error", err)
+		} else {
+			logger.Info("handled", "from", env.FromHandle, "bytes", len(output))
+		}
+	}
+}
+
+// execCommand runs the base command with payload substituted. If any arg is
+// "{}", it is replaced with payload; otherwise payload is appended as the
+// last argument. Environment variables TAILBUS_PAYLOAD, TAILBUS_SESSION,
+// and TAILBUS_FROM are set for the child process.
+func execCommand(ctx context.Context, baseArgs []string, payload, cwdPath string, envVars []string, timeout time.Duration) (string, error) {
+	// Build args: replace {} or append payload.
+	args := make([]string, len(baseArgs)-1)
+	copy(args, baseArgs[1:])
+	replaced := false
+	for i, arg := range args {
+		if arg == "{}" {
+			args[i] = payload
+			replaced = true
+		}
+	}
+	if !replaced && payload != "" {
+		args = append(args, payload)
+	}
+
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(execCtx, baseArgs[0], args...)
+	if cwdPath != "" {
+		cmd.Dir = cwdPath
+	}
+	cmd.Env = append(os.Environ(), envVars...)
+	cmd.Env = append(cmd.Env, "TAILBUS_PAYLOAD="+payload)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	output := stdout.String()
+	if output == "" && stderr.Len() > 0 {
+		output = stderr.String()
+	}
+	return output, err
 }

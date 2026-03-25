@@ -157,6 +157,17 @@ Every agent on your mesh becomes a tool Claude can call — including agents on 
 
 ## Examples
 
+### CLI Tools — any command becomes a Claude tool (start here)
+
+Turn `grep`, `cat`, `git log`, or any CLI program into an MCP tool in one line. No Python, no LLM, no Docker — just `tailbus attach --exec`.
+
+```bash
+cd examples/cli-tools
+./run.sh demo
+```
+
+→ [examples/cli-tools](examples/cli-tools/README.md)
+
 ### Incident Room — cross-department agents in one shared room
 
 A support agent discovers an orchestrator by capability. The orchestrator discovers specialists (logs, metrics, billing, statuspage), creates a shared room, and runs the investigation there. Five agents, four nodes, one room, one transcript.
