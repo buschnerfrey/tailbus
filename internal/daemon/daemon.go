@@ -19,6 +19,7 @@ import (
 	"github.com/alexanderfrey/tailbus/internal/config"
 	"github.com/alexanderfrey/tailbus/internal/handle"
 	"github.com/alexanderfrey/tailbus/internal/identity"
+	"github.com/alexanderfrey/tailbus/internal/chat"
 	"github.com/alexanderfrey/tailbus/internal/mcp"
 	"github.com/alexanderfrey/tailbus/internal/session"
 	"github.com/alexanderfrey/tailbus/internal/transport"
@@ -456,12 +457,33 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}
 	}
 
+	// Start Chat UI gateway if configured
+	if d.cfg.ChatAddr != "" {
+		chatGw := chat.NewGateway(d.agentServer, d.sessions, d.activity, d.cfg.MeshToken, d.logger)
+		if err := chatGw.Start(innerCtx); err != nil {
+			d.logger.Error("failed to start chat gateway", "error", err)
+		} else {
+			go func() {
+				srv := &http.Server{Addr: d.cfg.ChatAddr, Handler: chatGw.Handler()}
+				go func() {
+					<-innerCtx.Done()
+					srv.Close()
+				}()
+				d.logger.Info("chat UI listening", "addr", d.cfg.ChatAddr)
+				if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					d.logger.Error("chat UI error", "error", err)
+				}
+			}()
+		}
+	}
+
 	d.logger.Info("daemon running",
 		"node_id", d.cfg.NodeID,
 		"p2p_addr", d.cfg.ListenAddr,
 		"socket", d.cfg.SocketPath,
 		"metrics", d.cfg.MetricsAddr,
 		"mcp", d.cfg.MCPAddr,
+		"chat", d.cfg.ChatAddr,
 	)
 
 	<-innerCtx.Done()

@@ -26,6 +26,8 @@ func main() {
 	metricsAddr := flag.String("metrics", ":9090", "Prometheus metrics listen address (empty to disable)")
 	authToken := flag.String("auth-token", "", "auth token for coord admission control")
 	mcpAddr := flag.String("mcp", "", "MCP gateway listen address (e.g. :8080, empty to disable)")
+	chatAddr := flag.String("chat", "", "chat UI listen address (e.g. :3000, empty to disable)")
+	meshToken := flag.String("mesh-token", "", "shared token for personal mesh auth")
 	oauthURL := flag.String("oauth-url", "", "OAuth HTTP URL override for coord (default: auto-detect)")
 	flag.Parse()
 
@@ -49,6 +51,8 @@ func main() {
 		cfg.MetricsAddr = *metricsAddr
 		cfg.AuthToken = *authToken
 		cfg.MCPAddr = *mcpAddr
+		cfg.ChatAddr = *chatAddr
+		cfg.MeshToken = *meshToken
 	}
 
 	// Flag overrides config file
@@ -57,6 +61,12 @@ func main() {
 	}
 	if *mcpAddr != "" {
 		cfg.MCPAddr = *mcpAddr
+	}
+	if *chatAddr != "" {
+		cfg.ChatAddr = *chatAddr
+	}
+	if *meshToken != "" {
+		cfg.MeshToken = *meshToken
 	}
 	if *oauthURL != "" {
 		cfg.OAuthURL = *oauthURL

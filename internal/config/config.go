@@ -44,6 +44,8 @@ type DaemonConfig struct {
 	MetricsAddr    string `toml:"metrics_addr"`
 	AuthToken      string `toml:"auth_token"`
 	MCPAddr        string `toml:"mcp_addr"`
+	ChatAddr       string `toml:"chat_addr"`  // chat UI listen address (e.g. ":3000", empty = disabled)
+	MeshToken      string `toml:"mesh_token"` // shared token for personal mesh auth (empty = disabled)
 	CredentialFile string `toml:"credential_file"`
 	OAuthURL       string `toml:"oauth_url"`
 	TeamID         string `toml:"team_id"`

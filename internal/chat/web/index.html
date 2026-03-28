@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tailbus</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e1e4ed;
+    --text-dim: #8b8fa3;
+    --accent: #6c8cff;
+    --accent-dim: #4a5a8a;
+    --error: #ff6b6b;
+    --success: #51cf66;
+    --warning: #ffd43b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--surface);
+  }
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.5px; }
+  header h1 span { color: var(--accent); }
+  .header-status { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .status-dot.online { background: var(--success); }
+  .status-dot.offline { background: var(--error); }
+  .status-dot.connecting { background: var(--warning); animation: pulse 1s infinite; }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 240px; border-right: 1px solid var(--border); background: var(--surface);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .sidebar-section {
+    padding: 10px 14px 6px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--text-dim); display: flex;
+    justify-content: space-between; align-items: center;
+  }
+  .sidebar-btn {
+    background: none; border: none; color: var(--text-dim); cursor: pointer;
+    font-size: 13px; padding: 2px 6px; border-radius: 4px;
+  }
+  .sidebar-btn:hover { background: var(--border); color: var(--text); }
+  .sidebar-list { padding: 0 8px 8px; }
+  .sidebar-item {
+    padding: 8px 10px; border-radius: 6px; cursor: pointer;
+    margin-bottom: 2px; transition: background 0.15s; display: flex;
+    align-items: center; gap: 8px;
+  }
+  .sidebar-item:hover { background: var(--border); }
+  .sidebar-item.selected { background: var(--accent-dim); }
+  .item-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+  .item-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item-desc { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item-detail { flex: 1; min-width: 0; }
+  .item-tags { display: flex; gap: 3px; margin-top: 2px; flex-wrap: wrap; }
+  .tag { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--border); color: var(--text-dim); }
+
+  /* Chat area */
+  .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .chat-header {
+    padding: 10px 20px; border-bottom: 1px solid var(--border);
+    font-size: 14px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .chat-title { font-weight: 500; }
+  .chat-title .handle { color: var(--accent); }
+  .chat-meta { font-size: 11px; color: var(--text-dim); }
+
+  .messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; }
+  .msg {
+    max-width: 80%; padding: 8px 12px; border-radius: 8px; font-size: 13px;
+    line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  }
+  .msg.sent { align-self: flex-end; background: var(--accent-dim); border-bottom-right-radius: 2px; }
+  .msg.received { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
+  .msg.system { align-self: center; background: none; color: var(--text-dim); font-size: 11px; padding: 4px 0; }
+  .msg .sender { font-size: 11px; color: var(--accent); margin-bottom: 2px; font-weight: 500; }
+  .msg .time { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+
+  .empty-state {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 14px; flex-direction: column; gap: 8px;
+  }
+  .empty-state .hint { font-size: 12px; }
+
+  /* Input area */
+  .input-area { padding: 10px 20px 14px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  .input-area textarea {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; color: var(--text); font-family: inherit; font-size: 13px;
+    resize: none; outline: none; min-height: 38px; max-height: 120px;
+  }
+  .input-area textarea:focus { border-color: var(--accent); }
+  .input-area textarea:disabled { opacity: 0.5; }
+  .send-btn {
+    background: var(--accent); border: none; border-radius: 8px; padding: 0 16px;
+    color: #fff; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+  }
+  .send-btn:hover { opacity: 0.9; }
+  .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Activity bar */
+  .activity-bar {
+    padding: 4px 20px; border-top: 1px solid var(--border); background: var(--surface);
+    font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; min-height: 24px;
+  }
+
+  /* Auth overlay */
+  .auth-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--bg); display: flex; align-items: center; justify-content: center;
+    z-index: 100; flex-direction: column; gap: 16px;
+  }
+  .auth-overlay input {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; color: var(--text); font-family: inherit; font-size: 14px;
+    outline: none; width: 300px; text-align: center;
+  }
+  .auth-overlay input:focus { border-color: var(--accent); }
+  .auth-overlay button {
+    background: var(--accent); border: none; border-radius: 8px; padding: 10px 24px;
+    color: #fff; font-size: 14px; cursor: pointer;
+  }
+
+  /* New room dialog */
+  .dialog-backdrop {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 50;
+  }
+  .dialog {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; width: 360px; max-width: 90vw;
+  }
+  .dialog h3 { font-size: 15px; margin-bottom: 12px; }
+  .dialog input, .dialog select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; color: var(--text); font-family: inherit; font-size: 13px;
+    outline: none; margin-bottom: 10px;
+  }
+  .dialog input:focus { border-color: var(--accent); }
+  .dialog .btn-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+  .dialog .btn-row button {
+    padding: 6px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: none;
+  }
+  .dialog .btn-cancel { background: var(--border); color: var(--text); }
+  .dialog .btn-ok { background: var(--accent); color: #fff; }
+
+  .sending { animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+  @media (max-width: 600px) {
+    .sidebar { display: none; position: absolute; z-index: 10; height: calc(100% - 45px); top: 45px; }
+    .sidebar.open { display: flex; }
+    .mobile-toggle { display: block !important; }
+  }
+  .mobile-toggle { display: none; background: none; border: none; color: var(--text); font-size: 18px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <button class="mobile-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')">&#9776;</button>
+    <h1><span>tail</span>bus</h1>
+  </div>
+  <div class="header-status">
+    <div class="status-dot connecting" id="statusDot"></div>
+    <span id="statusText">connecting...</span>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-section">
+      <span>Agents</span>
+      <button class="sidebar-btn" onclick="loadAgents()" title="Refresh">&#8635;</button>
+    </div>
+    <div class="sidebar-list" id="agentList"></div>
+
+    <div class="sidebar-section">
+      <span>Rooms</span>
+      <button class="sidebar-btn" onclick="showNewRoomDialog()" title="New room">+</button>
+    </div>
+    <div class="sidebar-list" id="roomList"></div>
+  </div>
+
+  <div class="chat">
+    <div class="chat-header" id="chatHeader">
+      <div class="chat-title">Select an agent or room</div>
+    </div>
+    <div class="messages" id="messages">
+      <div class="empty-state">
+        <div>Welcome to tailbus</div>
+        <div class="hint">Select an agent to chat, or create a room</div>
+      </div>
+    </div>
+    <div class="input-area">
+      <textarea id="input" placeholder="Type a message..." rows="1" disabled
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+      <button class="send-btn" id="sendBtn" onclick="send()" disabled>Send</button>
+    </div>
+  </div>
+</div>
+
+<div class="activity-bar" id="activityBar">Waiting for events...</div>
+
+<div class="auth-overlay" id="authOverlay" style="display:none">
+  <h1 style="color:var(--accent);font-size:24px;"><span style="color:var(--text)">tail</span>bus</h1>
+  <p style="color:var(--text-dim);font-size:13px;">Enter your mesh token to connect</p>
+  <input id="authTokenInput" type="text" placeholder="Mesh token" autocomplete="off"
+    onkeydown="if(event.key==='Enter')doAuth()">
+  <button onclick="doAuth()">Connect</button>
+</div>
+
+<div id="dialogContainer"></div>
+
+<script>
+// --- State ---
+let agents = [];
+let rooms = [];
+let view = null;       // { type: 'agent', handle } or { type: 'room', id, title }
+let agentConvos = {};  // handle -> [{role, text, time}]
+let roomMessages = {}; // roomId -> [{sender, text, time, type, seq}]
+let ws = null;
+let meshToken = localStorage.getItem('mesh_token') || '';
+
+// --- Auth ---
+function checkAuth() {
+  // Try to fetch /api/me — if it fails with 401, show auth overlay
+  fetchAPI('/api/agents').then(data => {
+    document.getElementById('authOverlay').style.display = 'none';
+    boot();
+  }).catch(err => {
+    if (err.status === 401) {
+      document.getElementById('authOverlay').style.display = 'flex';
+      document.getElementById('authTokenInput').focus();
+    } else {
+      // No auth required
+      document.getElementById('authOverlay').style.display = 'none';
+      boot();
+    }
+  });
+}
+
+function doAuth() {
+  meshToken = document.getElementById('authTokenInput').value.trim();
+  if (!meshToken) return;
+  localStorage.setItem('mesh_token', meshToken);
+  document.cookie = 'mesh_token=' + meshToken + ';path=/;SameSite=Strict';
+  checkAuth();
+}
+
+// --- API helpers ---
+function fetchAPI(path, opts) {
+  const headers = { ...(opts?.headers || {}) };
+  if (meshToken) headers['Authorization'] = 'Bearer ' + meshToken;
+  return fetch(path, { ...opts, headers }).then(res => {
+    if (!res.ok) {
+      const err = new Error('HTTP ' + res.status);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  });
+}
+
+function postAPI(path, body) {
+  return fetchAPI(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+// --- Boot ---
+function boot() {
+  loadAgents();
+  loadRooms();
+  connectWS();
+  setInterval(loadAgents, 10000);
+  setInterval(loadRooms, 10000);
+}
+
+// --- Agents ---
+async function loadAgents() {
+  try {
+    agents = await fetchAPI('/api/agents') || [];
+    document.getElementById('statusDot').className = 'status-dot online';
+    document.getElementById('statusText').textContent = agents.length + ' agent' + (agents.length !== 1 ? 's' : '');
+    renderAgentList();
+  } catch (e) {
+    if (e.status !== 401) {
+      document.getElementById('statusDot').className = 'status-dot offline';
+      document.getElementById('statusText').textContent = 'disconnected';
+    }
+  }
+}
+
+function renderAgentList() {
+  const el = document.getElementById('agentList');
+  if (!agents.length) {
+    el.innerHTML = '<div style="padding:8px 10px;color:var(--text-dim);font-size:12px;">No agents online</div>';
+    return;
+  }
+  el.innerHTML = agents.map(a => `
+    <div class="sidebar-item ${view?.type==='agent'&&view.handle===a.handle ? 'selected' : ''}"
+         onclick="selectAgent('${esc(a.handle)}')">
+      <div class="item-dot"></div>
+      <div class="item-detail">
+        <div class="item-name">${esc(a.handle)}</div>
+        ${a.description ? `<div class="item-desc">${esc(a.description)}</div>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+// --- Rooms ---
+async function loadRooms() {
+  try {
+    rooms = await fetchAPI('/api/rooms') || [];
+    renderRoomList();
+  } catch (e) { /* ignore */ }
+}
+
+function renderRoomList() {
+  const el = document.getElementById('roomList');
+  if (!rooms.length) {
+    el.innerHTML = '<div style="padding:8px 10px;color:var(--text-dim);font-size:12px;">No rooms yet</div>';
+    return;
+  }
+  el.innerHTML = rooms.map(r => `
+    <div class="sidebar-item ${view?.type==='room'&&view.id===r.room_id ? 'selected' : ''}"
+         onclick="selectRoom('${esc(r.room_id)}','${esc(r.title)}')">
+      <div style="color:var(--text-dim);font-size:14px;">#</div>
+      <div class="item-detail">
+        <div class="item-name">${esc(r.title || r.room_id.slice(0,8))}</div>
+        <div class="item-desc">${r.members?.length || 0} members</div>
+      </div>
+    </div>`).join('');
+}
+
+// --- View switching ---
+function selectAgent(handle) {
+  view = { type: 'agent', handle };
+  if (!agentConvos[handle]) agentConvos[handle] = [];
+  const a = agents.find(x => x.handle === handle);
+  document.getElementById('chatHeader').innerHTML =
+    `<div class="chat-title"><span class="handle">${esc(handle)}</span></div>` +
+    `<div class="chat-meta">${a?.description || ''}</div>`;
+  enableInput('Message ' + handle + '...');
+  renderAgentList();
+  renderRoomList();
+  renderMessages();
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+async function selectRoom(id, title) {
+  view = { type: 'room', id, title };
+  document.getElementById('chatHeader').innerHTML =
+    `<div class="chat-title"># ${esc(title || id.slice(0,8))}</div>` +
+    `<div class="chat-meta"></div>`;
+  enableInput('Message room...');
+  renderAgentList();
+  renderRoomList();
+
+  // Load room history
+  if (!roomMessages[id]) roomMessages[id] = [];
+  try {
+    const events = await fetchAPI('/api/rooms/' + id + '/messages?since=0');
+    roomMessages[id] = (events || []).map(parseRoomEvent);
+    // Update member count in header
+    if (events?.length) {
+      const last = events[events.length - 1];
+      if (last.members) {
+        document.querySelector('.chat-meta').textContent = last.members.length + ' members';
+      }
+    }
+  } catch (e) { /* ignore */ }
+  renderMessages();
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function parseRoomEvent(ev) {
+  const type = ev.type || ev.event_type || '';
+  let text = '';
+  if (type.includes('MESSAGE_POSTED') || type.includes('message_posted')) {
+    try {
+      const p = JSON.parse(ev.payload);
+      text = p.text || p.message || ev.payload;
+    } catch (e) {
+      text = ev.payload || '';
+    }
+  } else if (type.includes('MEMBER_JOINED') || type.includes('member_joined')) {
+    text = null; // system message rendered differently
+  } else if (type.includes('MEMBER_LEFT') || type.includes('member_left')) {
+    text = null;
+  } else {
+    text = ev.payload || '';
+  }
+  return {
+    sender: ev.sender || ev.sender_handle || '',
+    text: text,
+    time: ev.sent_at ? new Date(ev.sent_at * 1000) : new Date(),
+    type: type,
+    seq: ev.room_seq,
+    members: ev.members,
+  };
+}
+
+function enableInput(placeholder) {
+  document.getElementById('input').disabled = false;
+  document.getElementById('input').placeholder = placeholder;
+  document.getElementById('sendBtn').disabled = false;
+  document.getElementById('input').focus();
+}
+
+// --- Render messages ---
+function renderMessages() {
+  const el = document.getElementById('messages');
+
+  if (!view) {
+    el.innerHTML = '<div class="empty-state"><div>Welcome to tailbus</div><div class="hint">Select an agent to chat, or create a room</div></div>';
+    return;
+  }
+
+  if (view.type === 'agent') {
+    const msgs = agentConvos[view.handle] || [];
+    if (!msgs.length) {
+      el.innerHTML = `<div class="empty-state"><div>Start a conversation with ${esc(view.handle)}</div></div>`;
+      return;
+    }
+    el.innerHTML = msgs.map(m =>
+      `<div class="msg ${m.role}">` +
+      `<div class="sender">${m.role === 'sent' ? 'you' : esc(view.handle)}</div>` +
+      `${esc(m.text)}` +
+      `<div class="time">${fmtTime(m.time)}</div></div>`
+    ).join('');
+  }
+
+  if (view.type === 'room') {
+    const msgs = roomMessages[view.id] || [];
+    if (!msgs.length) {
+      el.innerHTML = '<div class="empty-state"><div>No messages yet</div></div>';
+      return;
+    }
+    el.innerHTML = msgs.map(m => {
+      const type = m.type || '';
+      if (type.includes('MEMBER_JOINED') || type.includes('member_joined')) {
+        return `<div class="msg system">${esc(m.sender)} joined</div>`;
+      }
+      if (type.includes('MEMBER_LEFT') || type.includes('member_left')) {
+        return `<div class="msg system">${esc(m.sender)} left</div>`;
+      }
+      const isMe = m.sender === 'u-you';
+      return `<div class="msg ${isMe ? 'sent' : 'received'}">` +
+        `<div class="sender">${isMe ? 'you' : esc(m.sender)}</div>` +
+        `${esc(m.text || '')}` +
+        `<div class="time">${fmtTime(m.time)}</div></div>`;
+    }).join('');
+  }
+
+  el.scrollTop = el.scrollHeight;
+}
+
+// --- Send ---
+async function send() {
+  if (!view) return;
+  const input = document.getElementById('input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+  const btn = document.getElementById('sendBtn');
+
+  if (view.type === 'agent') {
+    agentConvos[view.handle].push({ role: 'sent', text, time: new Date() });
+    renderMessages();
+    btn.disabled = true; btn.classList.add('sending'); btn.textContent = '...';
+    input.disabled = true;
+
+    try {
+      const data = await postAPI('/api/agents/' + view.handle + '/message', { message: text });
+      agentConvos[view.handle].push({ role: 'received', text: data.message, time: new Date() });
+    } catch (e) {
+      agentConvos[view.handle].push({ role: 'received', text: 'Error: ' + e.message, time: new Date() });
+    }
+
+    btn.disabled = false; btn.classList.remove('sending'); btn.textContent = 'Send';
+    input.disabled = false; input.focus();
+    renderMessages();
+  }
+
+  if (view.type === 'room') {
+    try {
+      await postAPI('/api/rooms/' + view.id + '/messages', { message: text });
+      // Message will arrive via WebSocket, no need to add locally
+    } catch (e) {
+      roomMessages[view.id].push({ sender: 'system', text: 'Error: ' + e.message, time: new Date(), type: 'error' });
+      renderMessages();
+    }
+  }
+}
+
+// --- WebSocket ---
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  let url = proto + '//' + location.host + '/ws';
+  if (meshToken) url += '?token=' + encodeURIComponent(meshToken);
+
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    document.getElementById('statusDot').className = 'status-dot online';
+  };
+
+  ws.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      handleWSMessage(msg);
+    } catch (e) { /* ignore */ }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('statusDot').className = 'status-dot connecting';
+    document.getElementById('statusText').textContent = 'reconnecting...';
+    setTimeout(connectWS, 3000);
+  };
+
+  ws.onerror = () => { ws.close(); };
+}
+
+function handleWSMessage(msg) {
+  const bar = document.getElementById('activityBar');
+
+  if (msg.type === 'room_event') {
+    const ev = parseRoomEvent(msg);
+    const roomId = msg.room_id;
+    if (!roomMessages[roomId]) roomMessages[roomId] = [];
+    roomMessages[roomId].push(ev);
+
+    if (view?.type === 'room' && view.id === roomId) {
+      renderMessages();
+    }
+
+    const evType = msg.event_type || '';
+    if (evType.includes('MESSAGE_POSTED') || evType.includes('message_posted')) {
+      bar.textContent = (msg.sender || 'agent') + ' posted in room';
+    }
+  }
+
+  if (msg.type === 'session_message') {
+    bar.textContent = msg.from + ' sent a message';
+  }
+
+  if (msg.type === 'agent_online') {
+    bar.textContent = msg.handle + ' came online';
+    loadAgents();
+  }
+
+  if (msg.type === 'room_created') {
+    bar.textContent = 'Room created: ' + (msg.title || msg.room_id);
+    loadRooms();
+  }
+}
+
+// --- New room dialog ---
+function showNewRoomDialog() {
+  const container = document.getElementById('dialogContainer');
+  const agentOpts = agents.map(a =>
+    `<label style="display:flex;gap:6px;align-items:center;padding:3px 0;font-size:13px;cursor:pointer;">
+      <input type="checkbox" value="${esc(a.handle)}" class="room-member-cb"> ${esc(a.handle)}
+      <span style="color:var(--text-dim);font-size:11px;">${esc(a.description||'')}</span>
+    </label>`
+  ).join('');
+
+  container.innerHTML = `
+    <div class="dialog-backdrop" onclick="if(event.target===this)closeDialog()">
+      <div class="dialog">
+        <h3>Create room</h3>
+        <input id="roomTitle" placeholder="Room title" autofocus>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">Invite agents:</div>
+        <div style="max-height:200px;overflow-y:auto;padding:4px 0;">${agentOpts || '<span style="color:var(--text-dim);font-size:12px;">No agents available</span>'}</div>
+        <div class="btn-row">
+          <button class="btn-cancel" onclick="closeDialog()">Cancel</button>
+          <button class="btn-ok" onclick="createRoom()">Create</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('roomTitle').focus();
+  document.getElementById('roomTitle').addEventListener('keydown', e => {
+    if (e.key === 'Enter') createRoom();
+  });
+}
+
+async function createRoom() {
+  const title = document.getElementById('roomTitle').value.trim();
+  if (!title) return;
+  const members = [...document.querySelectorAll('.room-member-cb:checked')].map(cb => cb.value);
+
+  try {
+    const data = await postAPI('/api/rooms', { title, members });
+    closeDialog();
+    await loadRooms();
+    selectRoom(data.room_id, title);
+  } catch (e) {
+    alert('Failed to create room: ' + e.message);
+  }
+}
+
+function closeDialog() {
+  document.getElementById('dialogContainer').innerHTML = '';
+}
+
+// --- Helpers ---
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmtTime(d) {
+  if (!d) return '';
+  const dt = d instanceof Date ? d : new Date(d);
+  return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// --- Auto-resize input ---
+document.getElementById('input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+// --- Init ---
+checkAuth();
+</script>
+</body>
+</html>

@@ -120,15 +120,21 @@ func main() {
 		fmt.Println("\nTeam commands:")
 		fmt.Println("  team      Manage teams (create, list, members, invite, join, switch)")
 		fmt.Println("\nDaemon commands:")
-		fmt.Println("  stop      Stop the running daemon")
+		fmt.Println("  up        Start the daemon with sane defaults (chat UI, MCP gateway)")
+		fmt.Println("  down      Stop the running daemon")
+		fmt.Println("  stop      Stop the running daemon (alias for down)")
 		fmt.Println("\nMesh commands:")
 		fmt.Println("  fire      One-shot: send message, wait for response, print, exit")
 		fmt.Println("  register, introspect, list, find, open, send, subscribe, resolve, sessions, dashboard, trace, agent, attach")
 		os.Exit(1)
 	}
 
-	// Handle auth commands before connecting to daemon
+	// Handle commands that don't need a daemon connection
 	switch args[0] {
+	case "up":
+		runUp(args[1:], logger)
+		os.Exit(0)
+
 	case "team":
 		runTeam(args[1:], logger)
 		os.Exit(0)
@@ -557,7 +563,7 @@ func main() {
 			os.Exit(1)
 		}
 
-	case "stop":
+	case "stop", "down":
 		_, err := client.Shutdown(ctx, &agentpb.ShutdownRequest{})
 		if err != nil {
 			if strings.Contains(err.Error(), "no such file or directory") || strings.Contains(err.Error(), "connection refused") {
